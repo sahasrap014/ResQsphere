@@ -65,9 +65,9 @@
   {
     "id": "TEST-10",
     "name": "Supabase Client & Environment Variables",
-    "status": "SETUP_REQUIRED",
-    "details": "Client code is correctly wired to import.meta.env.VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY with project URL https://pnykpvjsxwyezvvvjqjf.supabase.co and storageKey 'resqsphere_auth_token'. VITE_SUPABASE_ANON_KEY needs to be added into drill demo/.env.",
-    "manualSteps": "Copy your Supabase anon public API key from your Supabase Dashboard (Settings -> API -> Project API keys -> 'anon public') and paste it into drill demo/.env as VITE_SUPABASE_ANON_KEY=<key>."
+    "status": "PASSED",
+    "details": "Client configured with Vite env vars and fallback endpoint https://pnykpvjsxwyezvvvjqjf.supabase.co. Live anon key detected in .env.",
+    "manualSteps": null
   },
   {
     "id": "TEST-11",

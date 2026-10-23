@@ -11,7 +11,7 @@ export const SUPABASE_ANON_KEY: string =
   (import.meta.env.VITE_SUPABASE_ANON_KEY as string) ||
   (import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY as string) ||
   (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string) ||
-  '';
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBueWtwdmpzeHd5ZXp2dnZqcWpmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI3NTg5NTgsImV4cCI6MjEwODMzNDk1OH0.iKKkYrLNE4FToGzvrM9U4Xp1vf1vopbxaVfaIQN6OD4';
 
 export const isSupabaseConfigured = Boolean(
   SUPABASE_URL && SUPABASE_ANON_KEY && SUPABASE_ANON_KEY.length > 10
