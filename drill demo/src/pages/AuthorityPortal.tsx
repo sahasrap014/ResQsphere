@@ -63,8 +63,8 @@ export const AuthorityPortal: React.FC = () => {
     userLocation,
   } = useDisaster();
 
-  // Selected incident for detail / assignment modal
-  const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
+  // Focused coordinates for Tactical Map
+  const [mapFocusCenter, setMapFocusCenter] = useState<[number, number] | undefined>(undefined);
   const [assignModalIncident, setAssignModalIncident] = useState<Incident | null>(null);
   const [selectedTeamId, setSelectedTeamId] = useState<string>('');
   const [assignError, setAssignError] = useState<string | null>(null);
@@ -129,7 +129,6 @@ export const AuthorityPortal: React.FC = () => {
     { id: 'teams', label: 'Response Teams', count: responseTeams.length },
     { id: 'resources', label: 'Resource Allocation', count: resources.length },
     { id: 'unmet_needs', label: 'Unmet Needs Detection', count: stats.pendingAssistance },
-    { id: 'risk', label: 'Risk Monitoring & Situation Overview' },
   ];
 
   // Handlers
@@ -493,7 +492,7 @@ export const AuthorityPortal: React.FC = () => {
               shelters={shelters}
               height="440px"
               title="Tactical Command Incident Map"
-              onSelectIncident={(inc) => setSelectedIncident(inc)}
+              center={mapFocusCenter}
               userLocation={userLocation}
               isDemo={mode === 'demo'}
             />
@@ -526,12 +525,24 @@ export const AuthorityPortal: React.FC = () => {
                       <div className="font-bold text-slate-900">{inc.title}</div>
                       <div className="text-[11px] text-slate-500">📍 {inc.location}</div>
                     </div>
-                    <button
-                      onClick={() => setAuthoritySection('verification')}
-                      className="px-2.5 py-1 rounded-lg bg-emerald-700 text-white font-semibold text-[11px]"
-                    >
-                      Verify
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => {
+                          setMapFocusCenter([inc.lat, inc.lng]);
+                          window.scrollTo({ top: 350, behavior: 'smooth' });
+                        }}
+                        className="px-2 py-1 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold text-[11px]"
+                        title="Center Tactical Map on this incident"
+                      >
+                        Map
+                      </button>
+                      <button
+                        onClick={() => setAuthoritySection('verification')}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-700 text-white font-semibold text-[11px]"
+                      >
+                        Verify
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -658,6 +669,18 @@ export const AuthorityPortal: React.FC = () => {
                       >
                         <XCircle className="w-4 h-4" />
                         <span>Reject</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setMapFocusCenter([inc.lat, inc.lng]);
+                          setAuthoritySection('overview');
+                          window.scrollTo({ top: 350, behavior: 'smooth' });
+                        }}
+                        className="w-full sm:w-auto py-2 px-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-medium transition"
+                        title="Locate coordinates on tactical map"
+                      >
+                        Locate on Map
                       </button>
 
                       <button
@@ -1094,72 +1117,6 @@ export const AuthorityPortal: React.FC = () => {
                     </div>
                   );
                 })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* SECTION 8: RISK MONITORING & SITUATION OVERVIEW COMBINED (Requirement 10) */}
-      {authoritySection === 'risk' && (
-        <div className="space-y-6">
-          {/* Situation Overview Brief Banner (Merged from Situation Overview) */}
-          <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
-            <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100">
-              <FileText className="w-5 h-5 text-emerald-800" />
-              <div>
-                <h2 className="text-base font-bold text-slate-900">Executive Incident Situation Report (SITREP)</h2>
-                <p className="text-xs text-slate-500">
-                  Unified command briefing for District Magistrate & State Disaster Management Authority
-                </p>
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2 text-xs leading-relaxed text-slate-700">
-              <p>
-                <strong>Operational Situation:</strong> Cloudburst activity over the upper Godavari catchment has raised river discharge at the Dowleswaram Barrage to 2.18 lakh cusecs. All 175 gates have been lifted to Level 3. A localized breach on the canal embankment at Kovvur has impacted 32 families, where NDRF Swift Water Team Alpha is currently executing evacuation ops.
-              </p>
-              <p>
-                <strong>Shelter & Medical Status:</strong> {shelters.length} designated shelters are active with {stats.peopleInShelters.toLocaleString()} evacuees. District Hospital emergency wing has active mobile diesel generators deployed. State Highway 42 has traffic diversions due to localized waterlogging.
-              </p>
-            </div>
-          </div>
-
-          {/* Hydrological Telemetry & Gauges */}
-          <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-6">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">River Basin Telemetry & Hydrological Risk</h2>
-              <p className="text-xs text-slate-500">
-                Live gauges and sensor monitoring at Godavari Basin reservoirs and embankments.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-                <span className="text-[11px] font-bold text-slate-400 uppercase">Dowleswaram Barrage Gauge</span>
-                <div className="text-3xl font-extrabold text-red-600 font-mono">14.85 m</div>
-                <p className="text-xs text-slate-600">Danger Mark: 15.00 m (15cm buffer)</p>
-                <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden mt-2">
-                  <div className="bg-red-600 h-full w-[95%]" />
-                </div>
-              </div>
-
-              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-                <span className="text-[11px] font-bold text-slate-400 uppercase">24-Hour Catchment Rainfall</span>
-                <div className="text-3xl font-extrabold text-slate-900 font-mono">182 mm</div>
-                <p className="text-xs text-slate-600">Category: Extremely Heavy Rain (IMD)</p>
-                <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden mt-2">
-                  <div className="bg-amber-600 h-full w-[85%]" />
-                </div>
-              </div>
-
-              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-                <span className="text-[11px] font-bold text-slate-400 uppercase">Current Water Discharge</span>
-                <div className="text-3xl font-extrabold text-slate-900 font-mono">2.18 L Cusecs</div>
-                <p className="text-xs text-slate-600">Status: All 175 gates raised to level 3</p>
-                <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden mt-2">
-                  <div className="bg-emerald-600 h-full w-[70%]" />
-                </div>
-              </div>
             </div>
           </div>
         </div>

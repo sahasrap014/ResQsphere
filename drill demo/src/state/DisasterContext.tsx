@@ -521,7 +521,28 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } else {
       setLiveIncidents((prev) => [newIncident, ...prev]);
       if (supabase && isSupabaseConfigured) {
-        Promise.resolve(supabase.from('incidents').insert([newIncident])).catch((err: any) => {
+        Promise.resolve(
+          supabase.from('incidents').insert([
+            {
+              id: newIncident.id,
+              title: newIncident.title,
+              type: newIncident.type,
+              description: newIncident.description,
+              location: newIncident.location,
+              district: newIncident.district,
+              lat: newIncident.lat,
+              lng: newIncident.lng,
+              severity: newIncident.severity,
+              status: 'pending_verification',
+              reported_by: newIncident.reportedBy,
+              reported_phone: newIncident.reportedPhone,
+              reported_at: newIncident.reportedAt,
+              casualties: newIncident.casualties || 0,
+              people_trapped: newIncident.peopleTrapped || 0,
+              citizen_id: user?.id || null,
+            },
+          ])
+        ).catch((err: any) => {
           console.warn('Failed to sync incident to Supabase:', err);
         });
       }
@@ -650,7 +671,32 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } else {
       setLiveRequests((prev) => [newReq, ...prev]);
       if (supabase && isSupabaseConfigured) {
-        Promise.resolve(supabase.from('assistance_requests').insert([newReq])).catch(() => {});
+        Promise.resolve(
+          supabase.from('assistance_requests').insert([
+            {
+              id: newReq.id,
+              citizen_name: newReq.citizenName,
+              citizen_id: user?.id || newReq.citizenId,
+              phone: newReq.phone,
+              category: newReq.category,
+              priority: newReq.priority,
+              people_count: newReq.peopleCount,
+              quantity_requested: newReq.quantityRequested,
+              quantity_fulfilled: 0,
+              remaining_quantity: newReq.remainingQuantity,
+              unit: newReq.unit,
+              location: newReq.location,
+              district: newReq.district,
+              lat: newReq.lat,
+              lng: newReq.lng,
+              details: newReq.details,
+              special_needs: newReq.specialNeeds,
+              status: 'pending',
+            },
+          ])
+        ).catch((err: any) => {
+          console.warn('Failed to sync assistance request to Supabase:', err);
+        });
       }
     }
 

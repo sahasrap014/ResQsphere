@@ -7,8 +7,7 @@ export type AuthoritySection =
   | 'shelters'
   | 'teams'
   | 'resources'
-  | 'unmet_needs'
-  | 'risk';
+  | 'unmet_needs';
 
 export type CitizenAction =
   | 'main'

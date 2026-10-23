@@ -8,6 +8,11 @@ import {
 } from '../types/disaster';
 import { validateIndianMobile } from '../utils/phoneValidation';
 import {
+  geocodeLocation,
+  validateCoordinates,
+  GeocodingResult,
+} from '../services/geocodingService';
+import {
   AlertCircle,
   Home,
   Utensils,
@@ -53,8 +58,7 @@ export const CitizenPortal: React.FC = () => {
   const [successFeedback, setSuccessFeedback] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Form states:
-  // 1. Report Emergency Form
+  // 1. Report Emergency Form & Geocoding Verification
   const [incidentTitle, setIncidentTitle] = useState('');
   const [incidentType, setIncidentType] = useState<IncidentType>('Flash Flood');
   const [incidentLocation, setIncidentLocation] = useState('');
@@ -62,6 +66,16 @@ export const CitizenPortal: React.FC = () => {
   const [incidentSeverity, setIncidentSeverity] = useState<IncidentSeverity>('high');
   const [peopleTrapped, setPeopleTrapped] = useState<number>(0);
   const [reportedPhone, setReportedPhone] = useState(user?.phone || '');
+
+  // Geocoding & coordinate verification states (Requirement 3: Location Entry & Disambiguation)
+  const [resolvedLat, setResolvedLat] = useState<number | null>(null);
+  const [resolvedLng, setResolvedLng] = useState<number | null>(null);
+  const [resolvedDistrict, setResolvedDistrict] = useState<string | null>(null);
+  const [geocodingStatus, setGeocodingStatus] = useState<'idle' | 'searching' | 'resolved' | 'ambiguous' | 'failed'>('idle');
+  const [candidateLocations, setCandidateLocations] = useState<GeocodingResult[]>([]);
+  const [manualCoordinatesMode, setManualCoordinatesMode] = useState(false);
+  const [manualLat, setManualLat] = useState('');
+  const [manualLng, setManualLng] = useState('');
 
   // 2. Request Assistance Form
   const [reqCategory, setReqCategory] = useState<AssistanceCategory>('food');
@@ -71,6 +85,11 @@ export const CitizenPortal: React.FC = () => {
   const [reqDetails, setReqDetails] = useState('');
   const [reqSpecialNeeds, setReqSpecialNeeds] = useState('');
   const [reqPhone, setReqPhone] = useState(user?.phone || '');
+  const [reqLat, setReqLat] = useState<number | null>(null);
+  const [reqLng, setReqLng] = useState<number | null>(null);
+  const [reqDistrict, setReqDistrict] = useState<string | null>(null);
+  const [reqGeocodingStatus, setReqGeocodingStatus] = useState<'idle' | 'searching' | 'resolved' | 'ambiguous' | 'failed'>('idle');
+  const [reqCandidates, setReqCandidates] = useState<GeocodingResult[]>([]);
 
   // 3. Property Damage Form
   const [damagePropertyType, setDamagePropertyType] = useState<
@@ -83,6 +102,58 @@ export const CitizenPortal: React.FC = () => {
   const [damageDesc, setDamageDesc] = useState('');
   const [damagePhone, setDamagePhone] = useState(user?.phone || '');
 
+  // Geocoding resolvers
+  const handleResolveIncidentLocation = async (queryText?: string) => {
+    const q = (queryText !== undefined ? queryText : incidentLocation).trim();
+    if (!q || q.length < 2) return;
+    setGeocodingStatus('searching');
+    setFormError(null);
+    try {
+      const res = await geocodeLocation(q);
+      if (res.results.length === 1 || (res.results.length > 0 && res.results[0].isExact)) {
+        const top = res.results[0];
+        setResolvedLat(top.lat);
+        setResolvedLng(top.lng);
+        setResolvedDistrict(top.district);
+        setIncidentLocation(top.displayName);
+        setGeocodingStatus('resolved');
+        setCandidateLocations([]);
+      } else if (res.results.length > 1) {
+        setCandidateLocations(res.results);
+        setGeocodingStatus('ambiguous');
+      } else {
+        setGeocodingStatus('failed');
+      }
+    } catch {
+      setGeocodingStatus('failed');
+    }
+  };
+
+  const handleResolveReqLocation = async (queryText?: string) => {
+    const q = (queryText !== undefined ? queryText : reqLocation).trim();
+    if (!q || q.length < 2) return;
+    setReqGeocodingStatus('searching');
+    try {
+      const res = await geocodeLocation(q);
+      if (res.results.length === 1 || (res.results.length > 0 && res.results[0].isExact)) {
+        const top = res.results[0];
+        setReqLat(top.lat);
+        setReqLng(top.lng);
+        setReqDistrict(top.district);
+        setReqLocation(top.displayName);
+        setReqGeocodingStatus('resolved');
+        setReqCandidates([]);
+      } else if (res.results.length > 1) {
+        setReqCandidates(res.results);
+        setReqGeocodingStatus('ambiguous');
+      } else {
+        setReqGeocodingStatus('failed');
+      }
+    } catch {
+      setReqGeocodingStatus('failed');
+    }
+  };
+
   // Privacy-filtered Citizen submissions (Section 5: Persistent per Citizen)
   const myEmergencyReports = mode === 'demo'
     ? incidents.filter((inc) => inc.isDemo)
@@ -94,8 +165,8 @@ export const CitizenPortal: React.FC = () => {
 
   const myDamageReports = damageReports;
 
-  // Handlers with Indian Mobile Validation
-  const handleReportEmergency = (e: React.FormEvent) => {
+  // Handlers with Indian Mobile Validation & Geocoded Coordinates Resolution
+  const handleReportEmergency = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
     if (!incidentTitle || !incidentLocation || !incidentDescription) return;
@@ -107,13 +178,57 @@ export const CitizenPortal: React.FC = () => {
       return;
     }
 
+    let targetLat: number;
+    let targetLng: number;
+    let targetDistrict: string = 'General Sector';
+
+    if (manualCoordinatesMode) {
+      const latNum = parseFloat(manualLat);
+      const lngNum = parseFloat(manualLng);
+      const val = validateCoordinates(latNum, lngNum);
+      if (!val.isValid) {
+        setFormError(val.error || 'Please enter valid Indian coordinates (Lat 6°–38°N, Lng 68°–98°E).');
+        return;
+      }
+      targetLat = latNum;
+      targetLng = lngNum;
+    } else if (resolvedLat !== null && resolvedLng !== null) {
+      targetLat = resolvedLat;
+      targetLng = resolvedLng;
+      targetDistrict = resolvedDistrict || 'General Sector';
+    } else {
+      // Resolve coordinates from location string
+      const geo = await geocodeLocation(incidentLocation);
+      if (geo.results.length === 1 || (geo.results.length > 0 && geo.results[0].isExact)) {
+        targetLat = geo.results[0].lat;
+        targetLng = geo.results[0].lng;
+        targetDistrict = geo.results[0].district;
+      } else if (geo.results.length > 1) {
+        setCandidateLocations(geo.results);
+        setGeocodingStatus('ambiguous');
+        setFormError(`Multiple locations matched "${incidentLocation}". Please select your exact location from the suggestions below.`);
+        return;
+      } else {
+        setGeocodingStatus('failed');
+        setFormError(`Could not verify geographical coordinates for "${incidentLocation}". Please select from suggestions or enter coordinates manually.`);
+        setManualCoordinatesMode(true);
+        return;
+      }
+    }
+
+    const finalCoordVal = validateCoordinates(targetLat, targetLng);
+    if (!finalCoordVal.isValid) {
+      setFormError(finalCoordVal.error || 'Coordinates must be valid Indian geographical coordinates.');
+      return;
+    }
+
     submitEmergencyReport({
       title: incidentTitle,
       type: incidentType,
       location: incidentLocation,
-      district: 'East Godavari Simulation Sector',
-      lat: 16.989 + (Math.random() - 0.5) * 0.03,
-      lng: 81.784 + (Math.random() - 0.5) * 0.03,
+      district: targetDistrict,
+      lat: Number(targetLat.toFixed(4)),
+      lng: Number(targetLng.toFixed(4)),
       severity: incidentSeverity,
       description: incidentDescription,
       reportedBy: user ? user.fullName : 'Verified Citizen',
@@ -122,18 +237,21 @@ export const CitizenPortal: React.FC = () => {
       casualties: 0,
     });
 
-    setSuccessFeedback('Emergency report submitted successfully. It has been routed to the Authority Verification Queue.');
+    setSuccessFeedback(`Emergency report submitted with verified coordinates (${targetLat.toFixed(4)}°N, ${targetLng.toFixed(4)}°E). Routed to Authority Verification Queue.`);
     setIncidentTitle('');
     setIncidentLocation('');
     setIncidentDescription('');
     setPeopleTrapped(0);
+    setResolvedLat(null);
+    setResolvedLng(null);
+    setGeocodingStatus('idle');
     setTimeout(() => {
       setSuccessFeedback(null);
       setCitizenAction('my_requests');
     }, 1500);
   };
 
-  const handleRequestAssistance = (e: React.FormEvent) => {
+  const handleRequestAssistance = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
     if (!reqLocation || !reqDetails) return;
@@ -145,6 +263,27 @@ export const CitizenPortal: React.FC = () => {
       return;
     }
 
+    let targetLat: number;
+    let targetLng: number;
+    let targetDistrict: string = 'General Sector';
+
+    if (reqLat !== null && reqLng !== null) {
+      targetLat = reqLat;
+      targetLng = reqLng;
+      targetDistrict = reqDistrict || 'General Sector';
+    } else {
+      const geo = await geocodeLocation(reqLocation);
+      if (geo.results.length > 0) {
+        targetLat = geo.results[0].lat;
+        targetLng = geo.results[0].lng;
+        targetDistrict = geo.results[0].district;
+      } else {
+        targetLat = mode === 'demo' ? 16.985 : (userLocation.lat || 16.985);
+        targetLng = mode === 'demo' ? 81.782 : (userLocation.lng || 81.782);
+        targetDistrict = userLocation.district || 'General Sector';
+      }
+    }
+
     submitAssistanceRequest({
       citizenName: user ? user.fullName : 'Citizen Applicant',
       citizenId: user ? user.id : 'CIT-CURRENT',
@@ -154,9 +293,9 @@ export const CitizenPortal: React.FC = () => {
       peopleCount: reqPeopleCount,
       quantityRequested: reqPeopleCount * 2,
       location: reqLocation,
-      district: 'East Godavari Simulation Sector',
-      lat: 16.985 + (Math.random() - 0.5) * 0.02,
-      lng: 81.782 + (Math.random() - 0.5) * 0.02,
+      district: targetDistrict,
+      lat: Number(targetLat.toFixed(4)),
+      lng: Number(targetLng.toFixed(4)),
       details: reqDetails,
       specialNeeds: reqSpecialNeeds,
     });
@@ -165,13 +304,16 @@ export const CitizenPortal: React.FC = () => {
     setReqLocation('');
     setReqDetails('');
     setReqSpecialNeeds('');
+    setReqLat(null);
+    setReqLng(null);
+    setReqGeocodingStatus('idle');
     setTimeout(() => {
       setSuccessFeedback(null);
       setCitizenAction('my_requests');
     }, 1500);
   };
 
-  const handleReportDamage = (e: React.FormEvent) => {
+  const handleReportDamage = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
     if (!damageLocation || !damageDesc) return;
@@ -183,6 +325,19 @@ export const CitizenPortal: React.FC = () => {
       return;
     }
 
+    let targetLat = mode === 'demo' ? 16.98 : (userLocation.lat || 16.98);
+    let targetLng = mode === 'demo' ? 81.78 : (userLocation.lng || 81.78);
+    let targetDistrict = userLocation.district || 'East Godavari Simulation Sector';
+
+    try {
+      const geo = await geocodeLocation(damageLocation);
+      if (geo.results.length > 0) {
+        targetLat = geo.results[0].lat;
+        targetLng = geo.results[0].lng;
+        targetDistrict = geo.results[0].district;
+      }
+    } catch {}
+
     submitDamageReport({
       citizenName: user ? user.fullName : 'Property Claimant',
       citizenId: user ? user.id : 'CIT-CURRENT',
@@ -190,9 +345,9 @@ export const CitizenPortal: React.FC = () => {
       propertyType: damagePropertyType,
       damageSeverity,
       location: damageLocation,
-      district: 'East Godavari Simulation Sector',
-      lat: 16.98 + (Math.random() - 0.5) * 0.02,
-      lng: 81.78 + (Math.random() - 0.5) * 0.02,
+      district: targetDistrict,
+      lat: Number(targetLat.toFixed(4)),
+      lng: Number(targetLng.toFixed(4)),
       estimatedLossInr: damageLossInr || 'Under Assessment',
       isStructuralHazard: isHazard,
       description: damageDesc,
@@ -452,15 +607,135 @@ export const CitizenPortal: React.FC = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Specific Location / Landmark *</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-semibold text-slate-700">Specific Location / Landmark *</label>
+                  <button
+                    type="button"
+                    onClick={() => handleResolveIncidentLocation()}
+                    className="text-[10px] text-emerald-700 hover:text-emerald-800 font-semibold flex items-center gap-1"
+                  >
+                    <MapPin className="w-3 h-3" />
+                    <span>Verify Geocoding</span>
+                  </button>
+                </div>
                 <input
                   type="text"
                   required
                   value={incidentLocation}
-                  onChange={(e) => setIncidentLocation(e.target.value)}
-                  placeholder="e.g. Near Ramalayam Temple, Old Kovvur Lane"
+                  onChange={(e) => {
+                    setIncidentLocation(e.target.value);
+                    if (resolvedLat !== null) {
+                      setResolvedLat(null);
+                      setResolvedLng(null);
+                      setGeocodingStatus('idle');
+                    }
+                  }}
+                  onBlur={() => {
+                    if (incidentLocation.trim().length >= 3 && geocodingStatus === 'idle') {
+                      handleResolveIncidentLocation();
+                    }
+                  }}
+                  placeholder="e.g. Hyderabad, Chennai, Kovvur Bund Rd, or Visakhapatnam"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs"
                 />
+
+                {/* Geocoding Resolution Feedback */}
+                {geocodingStatus === 'searching' && (
+                  <div className="mt-1.5 text-[11px] text-slate-500 flex items-center gap-1.5 animate-pulse">
+                    <Clock className="w-3 h-3" />
+                    <span>Resolving geographical coordinates...</span>
+                  </div>
+                )}
+
+                {resolvedLat !== null && resolvedLng !== null && (
+                  <div className="mt-1.5 p-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-[11px] flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>
+                        Verified: <strong>{resolvedLat.toFixed(4)}°N, {resolvedLng.toFixed(4)}°E</strong> ({resolvedDistrict})
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setManualCoordinatesMode(true)}
+                      className="text-emerald-800 underline text-[10px] font-medium"
+                    >
+                      Edit Pin
+                    </button>
+                  </div>
+                )}
+
+                {/* Ambiguous Location Selection */}
+                {geocodingStatus === 'ambiguous' && candidateLocations.length > 0 && (
+                  <div className="mt-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs space-y-1.5">
+                    <div className="font-semibold text-amber-900 flex items-center gap-1">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                      <span>Ambiguous Location. Please select exact administrative area:</span>
+                    </div>
+                    <div className="space-y-1 max-h-36 overflow-y-auto">
+                      {candidateLocations.map((c, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => {
+                            setResolvedLat(c.lat);
+                            setResolvedLng(c.lng);
+                            setResolvedDistrict(c.district);
+                            setIncidentLocation(c.displayName);
+                            setGeocodingStatus('resolved');
+                            setCandidateLocations([]);
+                          }}
+                          className="w-full text-left p-1.5 rounded-lg bg-white border border-amber-200 hover:bg-amber-100/60 text-slate-800 text-[11px] flex items-center justify-between transition"
+                        >
+                          <span className="truncate pr-2">{c.displayName}</span>
+                          <span className="font-mono text-[10px] text-slate-500 shrink-0">
+                            {c.lat.toFixed(4)}°N, {c.lng.toFixed(4)}°E
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Manual Coordinates Override */}
+                {manualCoordinatesMode && (
+                  <div className="mt-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-2">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                      <span>Manual Coordinate Entry (India Bounds: 6°–38°N, 68°–98°E)</span>
+                      <button
+                        type="button"
+                        onClick={() => setManualCoordinatesMode(false)}
+                        className="text-slate-500 hover:text-slate-800 font-normal text-[10px]"
+                      >
+                        Auto-resolve
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] text-slate-500 block mb-0.5">Latitude (°N)</label>
+                        <input
+                          type="number"
+                          step="0.0001"
+                          placeholder="17.3850"
+                          value={manualLat}
+                          onChange={(e) => setManualLat(e.target.value)}
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-slate-500 block mb-0.5">Longitude (°E)</label>
+                        <input
+                          type="number"
+                          step="0.0001"
+                          placeholder="78.4867"
+                          value={manualLng}
+                          onChange={(e) => setManualLng(e.target.value)}
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -699,15 +974,46 @@ export const CitizenPortal: React.FC = () => {
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Delivery / Staging Location *</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block font-semibold text-slate-700">Delivery / Staging Location *</label>
+                <button
+                  type="button"
+                  onClick={() => handleResolveReqLocation()}
+                  className="text-[10px] text-emerald-700 hover:text-emerald-800 font-semibold flex items-center gap-1"
+                >
+                  <MapPin className="w-3 h-3" />
+                  <span>Verify Location</span>
+                </button>
+              </div>
               <input
                 type="text"
                 required
                 value={reqLocation}
-                onChange={(e) => setReqLocation(e.target.value)}
-                placeholder="e.g. 1st Floor Terrace, D.No 12-4-8, Arya Samaj Street"
+                onChange={(e) => {
+                  setReqLocation(e.target.value);
+                  if (reqLat !== null) {
+                    setReqLat(null);
+                    setReqLng(null);
+                    setReqGeocodingStatus('idle');
+                  }
+                }}
+                onBlur={() => {
+                  if (reqLocation.trim().length >= 3 && reqGeocodingStatus === 'idle') {
+                    handleResolveReqLocation();
+                  }
+                }}
+                placeholder="e.g. Rajahmundry, Kovvur, or Visakhapatnam Sector"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs"
               />
+
+              {reqLat !== null && reqLng !== null && (
+                <div className="mt-1.5 p-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-[11px] flex items-center gap-1.5">
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>
+                    Location Verified: <strong>{reqLat.toFixed(4)}°N, {reqLng.toFixed(4)}°E</strong> ({reqDistrict})
+                  </span>
+                </div>
+              )}
             </div>
 
             <div>

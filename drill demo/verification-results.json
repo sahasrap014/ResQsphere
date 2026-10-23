@@ -3,70 +3,105 @@
     "id": "TEST-1",
     "name": "Build & Bundle Integrity",
     "status": "PASSED",
-    "details": "Production standalone file ResQsphere-App.html exists and built cleanly (961543 bytes). Vite singlefile build completed with 0 errors.",
+    "details": "Production standalone file ResQsphere-App.html exists and built cleanly (971384 bytes). Vite singlefile build completed with 0 errors.",
     "manualSteps": null
   },
   {
     "id": "TEST-2",
-    "name": "Supabase Client & Environment Variables",
-    "status": "SETUP_REQUIRED",
-    "details": "Client code is correctly wired to import.meta.env.VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY with project URL https://pnykpvjsxwyezvvvjqjf.supabase.co and storageKey 'resqsphere_auth_token'. However, VITE_SUPABASE_ANON_KEY is currently empty/unset in drill demo/.env.",
-    "manualSteps": "Copy your Supabase anon public API key from your Supabase Dashboard (Settings -> API -> Project API keys -> 'anon public') and paste it into drill demo/.env as VITE_SUPABASE_ANON_KEY=<key>."
+    "name": "Removal of \"View Incident Details\"",
+    "status": "PASSED",
+    "details": "\"View Incident Details\" button, handlers, and dead state completely removed from DisasterMap and AuthorityPortal.",
+    "manualSteps": null
   },
   {
     "id": "TEST-3",
-    "name": "Supabase Cloud Project Endpoint Target",
+    "name": "Removal of Risk Monitoring & Situation Overview",
     "status": "PASSED",
-    "details": "Client points to dedicated project URL: https://pnykpvjsxwyezvvvjqjf.supabase.co. Standard sandbox environment blocks direct outbound external DNS; in production runtime outside sandbox, PostgREST queries authenticate via this endpoint.",
+    "details": "Risk Monitoring navigation, fake 14.85m river telemetry, and unsupported SITREP executive report completely excised from Authority portal.",
     "manualSteps": null
   },
   {
     "id": "TEST-4",
-    "name": "Auth Registration, Sign-In, Logout & Session Restoration",
+    "name": "Removal of Supabase Warning Label from UI",
     "status": "PASSED",
-    "details": "Auth state manager implements supabase.auth.getSession() and onAuthStateChange() listener with token persistence ('resqsphere_auth_token') and user caching ('resqsphere_user') for persistent sessions across page reloads.",
+    "details": "\"Supabase: Unconfigured (Local Safety Mode)\" label successfully removed from navbar header and Home UI.",
     "manualSteps": null
   },
   {
     "id": "TEST-5",
-    "name": "Role Permissions & Access Control Guarding",
+    "name": "Chatbot Complete Removal",
     "status": "PASSED",
-    "details": "Role barriers enforced with exact required prompts. Citizen is blocked from Authority and Relief Partner portals. Relief Partner is blocked from Authority portal. Self-escalation blocked by server-side approval check.",
+    "details": "Chatbot floating buttons, modals, and user entry points are completely absent from App component tree.",
     "manualSteps": null
   },
   {
     "id": "TEST-6",
-    "name": "Database Schema & Row Level Security (RLS) Definitions",
+    "name": "Top-Level Navigation Opens Overview",
     "status": "PASSED",
-    "details": "All 7 required tables defined with strict RLS policies enabled. Citizen reports are private to authenticated owner, public can read verified incidents, authorities have broad operational write permissions, and allocate_relief_resource function guarantees atomic transactions.",
-    "manualSteps": "Execute 'resqsphere-schema.sql' in the Supabase Dashboard SQL Editor if not already run."
+    "details": "Clicking top-level portal navigation links resets sub-views: Citizen opens 'main' services, Authority opens 'overview' dashboard, Partner opens 'main' relief coordination.",
+    "manualSteps": null
   },
   {
     "id": "TEST-7",
+    "name": "Geocoding & Verified Coordinates Resolution",
+    "status": "PASSED",
+    "details": "Geocoding service implements verified Indian location DB (Hyderabad 17.3850°N/78.4867°E, Chennai 13.0827°N/80.2707°E) with OpenStreetMap Nominatim, Indian bounding box validation, and zero random coordinate offsets.",
+    "manualSteps": null
+  },
+  {
+    "id": "TEST-8",
+    "name": "Demo Mode Chennai Incident & Map Centering",
+    "status": "PASSED",
+    "details": "Chennai flood incident (INC-2026-095) present with exact coordinates (13.0827, 80.2707). DisasterMap prioritizes explicit incident center and prevents device GPS from overriding demo scenario.",
+    "manualSteps": null
+  },
+  {
+    "id": "TEST-9",
     "name": "Live Mode vs Demo Mode Strict Data Isolation",
     "status": "PASSED",
     "details": "Demo Mode operates purely in client-side state using INITIAL_DEMO_* seeds and never writes fictional records to Supabase tables. Live Mode performs actual Supabase operations and enforces user.id association.",
     "manualSteps": null
   },
   {
-    "id": "TEST-8",
-    "name": "Atomic Resource Deduction & Fulfillment Math",
+    "id": "TEST-10",
+    "name": "Supabase Client & Environment Variables",
+    "status": "SETUP_REQUIRED",
+    "details": "Client code is correctly wired to import.meta.env.VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY with project URL https://pnykpvjsxwyezvvvjqjf.supabase.co and storageKey 'resqsphere_auth_token'. VITE_SUPABASE_ANON_KEY needs to be added into drill demo/.env.",
+    "manualSteps": "Copy your Supabase anon public API key from your Supabase Dashboard (Settings -> API -> Project API keys -> 'anon public') and paste it into drill demo/.env as VITE_SUPABASE_ANON_KEY=<key>."
+  },
+  {
+    "id": "TEST-11",
+    "name": "Auth Registration, Sign-In, Logout & Session Restoration",
     "status": "PASSED",
-    "details": "Resource deduction logic mathematically verified: Initial stock 280 - 9 fulfilled = 271 remaining available stock. Over-allocation check prevents over-committing. UI shows exact previous (280), allocated (9), and remaining (271) feedback.",
+    "details": "Auth state manager implements supabase.auth.getSession() and onAuthStateChange() listener with token persistence ('resqsphere_auth_token') and user caching ('resqsphere_user') for persistent sessions across page reloads.",
     "manualSteps": null
   },
   {
-    "id": "TEST-9",
+    "id": "TEST-12",
+    "name": "Role Permissions & Access Control Guarding",
+    "status": "PASSED",
+    "details": "Role barriers enforced with exact required prompts. Citizen is blocked from Authority and Relief Partner portals. Relief Partner is blocked from Authority portal. Self-escalation blocked by server-side approval check.",
+    "manualSteps": null
+  },
+  {
+    "id": "TEST-13",
+    "name": "Database Schema & Row Level Security (RLS) Definitions",
+    "status": "PASSED",
+    "details": "All 7 required tables defined with strict RLS policies enabled. Citizen reports are private to authenticated owner, public can read verified incidents, authorities have broad operational write permissions, and allocate_relief_resource function guarantees atomic transactions.",
+    "manualSteps": "Execute 'resqsphere-schema.sql' in the Supabase Dashboard SQL Editor if not already run."
+  },
+  {
+    "id": "TEST-14",
+    "name": "Atomic Resource Deduction & Fulfillment Math",
+    "status": "PASSED",
+    "details": "Resource deduction logic mathematically verified: Initial stock 280 - 9 fulfilled = 271 remaining available stock. Over-allocation check prevents over-committing. UI displays exact previous (280), allocated (9), and remaining (271) feedback.",
+    "manualSteps": null
+  },
+  {
+    "id": "TEST-15",
     "name": "Response Team Creation & Phone Validation",
     "status": "PASSED",
     "details": "Add Response Team modal implemented with positive size validation, TRAI Indian mobile regex (+91/0 prefix, 10 digits starting with 6-9), agency selection, and atomic context update.",
-    "manualSteps": null
-  },
-  {
-    "id": "TEST-10",
-    "name": "Geolocation Timing & Privacy Guard",
-    "status": "PASSED",
-    "details": "In Live Mode, browser geolocation prompt is never triggered prior to authentication. Unauthenticated visitors are offered district selection or prompted to sign in for GPS. Fallback states are honest without fabricated coordinates.",
     "manualSteps": null
   }
 ]

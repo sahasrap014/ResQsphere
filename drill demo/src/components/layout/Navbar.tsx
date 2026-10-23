@@ -92,12 +92,6 @@ export const Navbar: React.FC = () => {
             <span className="font-semibold text-white tracking-wide uppercase text-[11px]">
               LIVE DATA MODE — REAL-TIME RESQSPHERE TELEMETRY
             </span>
-            <span className="hidden md:inline-block text-emerald-400/60">|</span>
-            <span className="hidden md:inline-block text-[11px] text-emerald-300/80">
-              {supabaseStatus.status === 'connected'
-                ? 'Supabase: Connected'
-                : 'Supabase: Unconfigured (Local Safety Mode)'}
-            </span>
           </div>
           <div className="flex items-center gap-2 mt-1 sm:mt-0">
             <button

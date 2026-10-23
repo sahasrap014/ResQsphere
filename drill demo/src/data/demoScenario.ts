@@ -269,6 +269,27 @@ export const INITIAL_DEMO_INCIDENTS: Incident[] = [
     reportedAt: '2026-10-23T11:00:00Z',
     isDemo: true,
   },
+  {
+    id: 'INC-2026-095',
+    title: 'Severe Stormwater Inundation in Velachery Lowlands, Chennai',
+    type: 'Severe Waterlogging',
+    description: 'Submerged arterial junctions and low-lying residential apartment complexes due to heavy coastal cloudburst. 12 citizens trapped on first floor awaiting inflatable boat transport.',
+    location: '100 Feet Bypass Road, Velachery West, Chennai',
+    district: 'Chennai Coastal Sector',
+    lat: 13.0827,
+    lng: 80.2707,
+    severity: 'high',
+    status: 'verified',
+    reportedBy: 'Greater Chennai Disaster Volunteer Desk',
+    reportedPhone: '+91 94440 12345',
+    reportedAt: '2026-10-23T11:15:00Z',
+    casualties: 0,
+    peopleTrapped: 12,
+    assignedTeamName: 'SDRF Coastal Unit 3',
+    verifiedAt: '2026-10-23T11:25:00Z',
+    verifiedBy: 'State Emergency Operations Center (SEOC)',
+    isDemo: true,
+  },
 ];
 
 export const INITIAL_DEMO_SHELTERS: Shelter[] = [

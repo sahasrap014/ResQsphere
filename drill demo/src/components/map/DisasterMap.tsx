@@ -12,7 +12,6 @@ interface DisasterMapProps {
   center?: [number, number];
   zoom?: number;
   showShelters?: boolean;
-  onSelectIncident?: (incident: Incident) => void;
   title?: string;
   userLocation?: UserLocation;
   isDemo?: boolean;
@@ -135,34 +134,40 @@ export const DisasterMap: React.FC<DisasterMapProps> = ({
   center,
   zoom,
   showShelters = true,
-  onSelectIncident,
   title = 'Live Incident & Safe Shelter Map',
   userLocation,
   isDemo = false,
 }) => {
   const [filter, setFilter] = useState<'all' | 'verified' | 'pending' | 'shelters'>('all');
 
-  // Dynamic Center & Zoom (Fix Requirement 1: no hardcoded AP coastal center)
+  // Dynamic Center & Zoom
   const activeCenter: [number, number] = React.useMemo(() => {
+    // 1. Explicitly passed center (e.g. selected incident or explicit coordinate) always takes precedence
     if (center && center[0] && center[1]) return center;
-    if (userLocation && (userLocation.isDetected || userLocation.isManual)) {
-      return [userLocation.lat, userLocation.lng];
-    }
+
+    // 2. In Demo Mode, never override demo scenario with device GPS
     if (isDemo) {
       return [16.9891, 81.784];
     }
-    // Neutral pan-India overview when location not yet obtained
+
+    // 3. In Live Mode, use user location if detected or manually chosen
+    if (userLocation && (userLocation.isDetected || userLocation.isManual)) {
+      return [userLocation.lat, userLocation.lng];
+    }
+
+    // 4. Neutral pan-India overview when location not yet obtained
     return [20.5937, 78.9629];
   }, [center, userLocation?.lat, userLocation?.lng, userLocation?.isDetected, userLocation?.isManual, isDemo]);
 
   const activeZoom = React.useMemo(() => {
     if (zoom) return zoom;
+    if (center && center[0] && center[1]) return 13;
+    if (isDemo) return 12;
     if (userLocation && (userLocation.isDetected || userLocation.isManual)) {
       return 12;
     }
-    if (isDemo) return 12;
     return 5; // India-wide zoom
-  }, [zoom, userLocation?.isDetected, userLocation?.isManual, isDemo]);
+  }, [zoom, center, userLocation?.isDetected, userLocation?.isManual, isDemo]);
 
   const filteredIncidents = incidents.filter((inc) => {
     if (filter === 'verified') return inc.status === 'verified' || inc.status === 'dispatched' || inc.status === 'in_progress';
@@ -312,15 +317,6 @@ export const DisasterMap: React.FC<DisasterMapProps> = ({
                       </div>
                     )}
                   </div>
-
-                  {onSelectIncident && (
-                    <button
-                      onClick={() => onSelectIncident(inc)}
-                      className="mt-2 w-full py-1 bg-[#1B4332] text-white rounded text-[11px] font-semibold hover:bg-[#245740] transition"
-                    >
-                      View Incident Details
-                    </button>
-                  )}
                 </div>
               </Popup>
             </Marker>
