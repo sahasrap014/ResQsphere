@@ -4,24 +4,18 @@ export type AuthoritySection =
   | 'overview'
   | 'verification'
   | 'duplicates'
-  | 'map'
   | 'shelters'
   | 'teams'
   | 'resources'
   | 'unmet_needs'
-  | 'risk'
-  | 'situation'
-  | 'analytics'
-  | 'integrations';
+  | 'risk';
 
 export type CitizenAction =
   | 'main'
   | 'report_emergency'
   | 'find_shelter'
-  | 'evacuation_guidance'
   | 'request_help'
   | 'report_damage'
-  | 'safety_guidance'
   | 'my_requests'
   | 'checklist';
 
@@ -32,8 +26,7 @@ export type PartnerSection =
   | 'register_volunteer'
   | 'register_vehicle'
   | 'pending_needs'
-  | 'matching'
-  | 'impact';
+  | 'matching';
 
 export type IncidentSeverity = 'low' | 'moderate' | 'high' | 'critical';
 
@@ -43,7 +36,8 @@ export type IncidentStatus =
   | 'dispatched'
   | 'in_progress'
   | 'resolved'
-  | 'rejected';
+  | 'rejected'
+  | 'duplicate';
 
 export type IncidentType =
   | 'Flash Flood'
@@ -78,6 +72,7 @@ export interface Incident {
   isDuplicateOf?: string;
   isPotentialDuplicate?: boolean;
   duplicateGroup?: string;
+  duplicateReviewed?: boolean;
   verificationNotes?: string;
   verifiedAt?: string;
   verifiedBy?: string;
@@ -95,7 +90,7 @@ export type AssistanceCategory =
 
 export type RequestPriority = 'low' | 'medium' | 'high' | 'urgent';
 
-export type RequestStatus = 'pending' | 'matched' | 'dispatched' | 'fulfilled' | 'cancelled';
+export type RequestStatus = 'pending' | 'partially_fulfilled' | 'matched' | 'dispatched' | 'fulfilled' | 'cancelled';
 
 export interface AssistanceRequest {
   id: string;
@@ -116,8 +111,27 @@ export interface AssistanceRequest {
   fulfilledBy?: string;
   fulfilledAt?: string;
   allocatedResourceId?: string;
+  quantityRequested?: number;
+  quantityFulfilled?: number;
+  remainingQuantity?: number;
+  unit?: string;
   isDemo?: boolean;
 }
+
+export interface ResourceAllocation {
+  id: string;
+  requestId: string;
+  resourceId: string;
+  resourceName: string;
+  category: AssistanceCategory;
+  allocatedQuantity: number;
+  unit: string;
+  allocatedBy: string;
+  allocatedAt: string;
+  isDemo?: boolean;
+}
+
+export type ShelterStatus = 'active' | 'near_capacity' | 'full' | 'inactive';
 
 export interface Shelter {
   id: string;
@@ -128,11 +142,25 @@ export interface Shelter {
   lng: number;
   capacity: number;
   currentOccupancy: number;
-  status: 'active' | 'near_capacity' | 'full' | 'inactive';
+  status: ShelterStatus;
   facilities: string[];
   contactPhone: string;
   contactPerson: string;
   isDemo?: boolean;
+}
+
+export interface AddShelterInput {
+  name: string;
+  address: string;
+  district: string;
+  lat: number;
+  lng: number;
+  capacity: number;
+  currentOccupancy: number;
+  status?: ShelterStatus;
+  facilities?: string[];
+  contactPhone: string;
+  contactPerson: string;
 }
 
 export interface ResponseTeam {
@@ -267,4 +295,13 @@ export interface UserProfile {
   district?: string;
   agency?: string;
   isApproved?: boolean;
+}
+
+export interface UserLocation {
+  lat: number;
+  lng: number;
+  address?: string;
+  district?: string;
+  isDetected: boolean;
+  permissionStatus: 'prompt' | 'granted' | 'denied' | 'unavailable';
 }

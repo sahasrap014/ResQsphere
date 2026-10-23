@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { useDisaster } from '../state/DisasterContext';
 import { PartnerSection, AssistanceCategory } from '../types/disaster';
+import { validateIndianMobile } from '../utils/phoneValidation';
 import {
   HeartHandshake,
   Package,
   Users,
   Truck,
   Layers,
-  BarChart3,
   CheckCircle,
   PlusCircle,
   ArrowRight,
@@ -16,6 +16,7 @@ import {
   Sparkles,
   ShieldCheck,
   Check,
+  AlertTriangle,
 } from 'lucide-react';
 
 export const ReliefPartnerPortal: React.FC = () => {
@@ -34,6 +35,7 @@ export const ReliefPartnerPortal: React.FC = () => {
   } = useDisaster();
 
   const [successFeedback, setSuccessFeedback] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   // Form states:
   // 1. Register Resource Form
@@ -66,7 +68,14 @@ export const ReliefPartnerPortal: React.FC = () => {
 
   const handleRegisterResource = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     if (!itemName || !resLocation) return;
+
+    const phoneVal = validateIndianMobile(resPhone);
+    if (!phoneVal.isValid) {
+      setFormError(phoneVal.error || 'Enter a valid 10-digit Indian mobile number for partner contact.');
+      return;
+    }
 
     registerResource({
       partnerName,
@@ -79,7 +88,7 @@ export const ReliefPartnerPortal: React.FC = () => {
       district: 'East Godavari Simulation Sector',
       lat: 16.99,
       lng: 81.78,
-      contactPhone: resPhone,
+      contactPhone: phoneVal.normalized,
     });
 
     setSuccessFeedback('Relief resource registered successfully! Visible in Authority Allocation pool.');
@@ -92,11 +101,18 @@ export const ReliefPartnerPortal: React.FC = () => {
 
   const handleRegisterVolunteer = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     if (!volName || !volPhone) return;
+
+    const phoneVal = validateIndianMobile(volPhone);
+    if (!phoneVal.isValid) {
+      setFormError(phoneVal.error || 'Enter a valid 10-digit Indian mobile number for volunteer contact.');
+      return;
+    }
 
     registerVolunteer({
       name: volName,
-      phone: volPhone,
+      phone: phoneVal.normalized,
       email: volEmail || 'volunteer@example.org',
       district: 'East Godavari Simulation Sector',
       skills: volSkills.split(',').map((s) => s.trim()),
@@ -115,7 +131,14 @@ export const ReliefPartnerPortal: React.FC = () => {
 
   const handleRegisterVehicle = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     if (!vehReg || !vehDriver) return;
+
+    const phoneVal = validateIndianMobile(vehDriverPhone || '+91 98000 00000');
+    if (!phoneVal.isValid) {
+      setFormError(phoneVal.error || 'Enter a valid 10-digit Indian mobile number for driver contact.');
+      return;
+    }
 
     registerVehicle({
       partnerName: user ? user.fullName : 'Humanitarian Fleet Pool',
@@ -123,7 +146,7 @@ export const ReliefPartnerPortal: React.FC = () => {
       registrationNumber: vehReg,
       capacity: vehCapacity,
       driverName: vehDriver,
-      driverPhone: vehDriverPhone || '+91 98000 00000',
+      driverPhone: phoneVal.normalized,
       location: vehLocation,
       lat: 16.99,
       lng: 81.78,
@@ -132,6 +155,7 @@ export const ReliefPartnerPortal: React.FC = () => {
     setSuccessFeedback('Relief vehicle registered and marked available for mission dispatch.');
     setVehReg('');
     setVehDriver('');
+    setVehDriverPhone('');
     setTimeout(() => {
       setSuccessFeedback(null);
       setPartnerSection('main');
@@ -144,6 +168,7 @@ export const ReliefPartnerPortal: React.FC = () => {
     setTimeout(() => setSuccessFeedback(null), 2000);
   };
 
+  // Requirement 13: Completely removed Impact Reports
   const partnerTabs: { id: PartnerSection; label: string; count?: number }[] = [
     { id: 'main', label: 'Overview' },
     { id: 'register_resource', label: 'Register Resources' },
@@ -152,7 +177,6 @@ export const ReliefPartnerPortal: React.FC = () => {
     { id: 'register_vehicle', label: 'Relief Vehicles', count: vehicles.length },
     { id: 'pending_needs', label: 'Pending Citizen Requests', count: pendingNeeds.length },
     { id: 'matching', label: 'Resource-to-Need Matching' },
-    { id: 'impact', label: 'Impact Reports' },
   ];
 
   return (
@@ -202,7 +226,14 @@ export const ReliefPartnerPortal: React.FC = () => {
         })}
       </div>
 
-      {/* Success Notification */}
+      {/* Feedback Notifications */}
+      {formError && (
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 text-xs font-medium flex items-center gap-3 animate-in fade-in">
+          <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+          <span>{formError}</span>
+        </div>
+      )}
+
       {successFeedback && (
         <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-medium flex items-center gap-3 animate-in fade-in">
           <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
@@ -835,40 +866,6 @@ export const ReliefPartnerPortal: React.FC = () => {
                 </div>
               );
             })}
-          </div>
-        </div>
-      )}
-
-      {/* VIEW 8: IMPACT REPORTS */}
-      {partnerSection === 'impact' && (
-        <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-6">
-          <div>
-            <h2 className="text-base font-bold text-slate-900">Relief Impact & Distribution Summary</h2>
-            <p className="text-xs text-slate-500">
-              Aggregated humanitarian contributions across all participating partner agencies.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-1">
-              <span className="text-[10px] font-bold text-slate-400 uppercase">Total Food Distributed</span>
-              <div className="text-2xl font-bold text-slate-900">12,400 Packets</div>
-              <p className="text-xs text-emerald-700">Akshaya Patra & Seva Bharati</p>
-            </div>
-
-            <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-1">
-              <span className="text-[10px] font-bold text-slate-400 uppercase">Potable Water Supplied</span>
-              <div className="text-2xl font-bold text-slate-900">45,000 Liters</div>
-              <p className="text-xs text-sky-700">Municipal Board & Rotary Club</p>
-            </div>
-
-            <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-1">
-              <span className="text-[10px] font-bold text-slate-400 uppercase">Citizen Requests Met</span>
-              <div className="text-2xl font-bold text-slate-900">
-                {assistanceRequests.filter((r) => r.status === 'fulfilled').length} Fulfilled
-              </div>
-              <p className="text-xs text-slate-600">Across 6 relief sectors</p>
-            </div>
           </div>
         </div>
       )}

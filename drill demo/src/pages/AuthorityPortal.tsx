@@ -1,33 +1,39 @@
 import React, { useState } from 'react';
 import { useDisaster } from '../state/DisasterContext';
-import { AuthoritySection, Incident, Shelter, ResponseTeam } from '../types/disaster';
 import { DisasterMap } from '../components/map/DisasterMap';
 import {
+  AuthoritySection,
+  Incident,
+  IncidentSeverity,
+  IncidentStatus,
+  ResponseTeam,
+  Shelter,
+  AssistanceRequest,
+  ReliefResource,
+} from '../types/disaster';
+import { validateIndianMobile } from '../utils/phoneValidation';
+import {
   ShieldAlert,
-  Users,
+  ShieldCheck,
+  Truck,
   Home,
   Clock,
   CheckCircle,
   XCircle,
   AlertTriangle,
-  MapPin,
-  Truck,
-  Package,
-  Activity,
-  Layers,
-  BarChart3,
-  PlugZap,
-  Radio,
-  FileCheck,
-  Search,
-  Filter,
-  Check,
-  RotateCcw,
-  Sparkles,
-  PhoneCall,
   Info,
-  Sliders,
-  TrendingUp,
+  MapPin,
+  Sparkles,
+  Link2,
+  GitFork,
+  Plus,
+  Package,
+  Layers,
+  Phone,
+  Droplets,
+  Activity,
+  FileText,
+  X,
 } from 'lucide-react';
 
 export const AuthorityPortal: React.FC = () => {
@@ -43,56 +49,180 @@ export const AuthorityPortal: React.FC = () => {
     verifyIncident,
     assignTeamToIncident,
     updateShelterOccupancy,
-    markPotentialDuplicate,
+    addShelter,
+    linkDuplicateToPrimary,
+    keepIncidentDistinct,
+    matchAndAllocateResource,
     mode,
-    setMode,
     resetScenario,
-    supabaseStatus,
+    user,
   } = useDisaster();
 
   // Selected incident for detail / assignment modal
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [assignModalIncident, setAssignModalIncident] = useState<Incident | null>(null);
   const [selectedTeamId, setSelectedTeamId] = useState<string>('');
+  const [assignError, setAssignError] = useState<string | null>(null);
 
-  // Search filter
-  const [searchQuery, setSearchQuery] = useState('');
-  const [severityFilter, setSeverityFilter] = useState<string>('all');
+  // Shelter state
+  const [isAddShelterOpen, setIsAddShelterOpen] = useState(false);
+  const [shelterName, setShelterName] = useState('');
+  const [shelterAddress, setShelterAddress] = useState('');
+  const [shelterCapacity, setShelterCapacity] = useState<number>(500);
+  const [shelterOccupancy, setShelterOccupancy] = useState<number>(0);
+  const [shelterPhone, setShelterPhone] = useState('');
+  const [shelterContactPerson, setShelterContactPerson] = useState('');
+  const [shelterFormError, setShelterFormError] = useState<string | null>(null);
+  const [shelterFormSuccess, setShelterFormSuccess] = useState<string | null>(null);
 
-  // Shelter occupancy editor state
+  // Shelter quick occupancy editor
   const [editingShelterId, setEditingShelterId] = useState<string | null>(null);
   const [newOccupancyValue, setNewOccupancyValue] = useState<number>(0);
+  const [occupancyEditError, setOccupancyEditError] = useState<string | null>(null);
 
-  // Verification Queue filter
+  // Duplicate Review State
+  const [linkingIncident, setLinkingIncident] = useState<Incident | null>(null);
+  const [targetPrimaryId, setTargetPrimaryId] = useState<string>('');
+  const [duplicateActionFeedback, setDuplicateActionFeedback] = useState<string | null>(null);
+
+  // Match Resources State (Requirement 9)
+  const [matchingRequest, setMatchingRequest] = useState<AssistanceRequest | null>(null);
+  const [selectedResourceId, setSelectedResourceId] = useState<string>('');
+  const [quantityToAllocate, setQuantityToAllocate] = useState<number>(1);
+  const [matchingError, setMatchingError] = useState<string | null>(null);
+  const [matchingSuccess, setMatchingSuccess] = useState<string | null>(null);
+  const [isMatchingSubmitting, setIsMatchingSubmitting] = useState(false);
+
+  // Filtering
   const pendingIncidents = incidents.filter((inc) => inc.status === 'pending_verification');
-  const duplicateIncidents = incidents.filter((inc) => inc.isPotentialDuplicate || inc.isDuplicateOf);
+  // Unresolved duplicates: marked potential or duplicate, but not yet explicitly reviewed as distinct
+  const unresolvedDuplicates = incidents.filter(
+    (inc) => (inc.isPotentialDuplicate || inc.isDuplicateOf) && !inc.duplicateReviewed
+  );
 
-  // Sub-navigation sections
+  // Clean sub-navigation items: Exactly 7 operational sections
   const subNavItems: { id: AuthoritySection; label: string; count?: number }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'verification', label: 'Incident Verification', count: pendingIncidents.length },
-    { id: 'duplicates', label: 'Duplicate Review', count: duplicateIncidents.length },
-    { id: 'map', label: 'Live Incident Map' },
+    { id: 'duplicates', label: 'Duplicate Review', count: unresolvedDuplicates.length },
     { id: 'shelters', label: 'Shelter Management', count: shelters.length },
     { id: 'teams', label: 'Response Teams', count: responseTeams.length },
     { id: 'resources', label: 'Resource Allocation', count: resources.length },
     { id: 'unmet_needs', label: 'Unmet Needs Detection', count: stats.pendingAssistance },
-    { id: 'risk', label: 'Risk Monitoring' },
-    { id: 'situation', label: 'Situation Overview' },
-    { id: 'analytics', label: 'Reports & Analytics' },
-    { id: 'integrations', label: 'Integration Status' },
+    { id: 'risk', label: 'Risk Monitoring & Situation Overview' },
   ];
 
+  // Handlers
   const handleAssignTeam = () => {
     if (!assignModalIncident || !selectedTeamId) return;
-    assignTeamToIncident(assignModalIncident.id, selectedTeamId);
+    setAssignError(null);
+    const result = assignTeamToIncident(assignModalIncident.id, selectedTeamId);
+    if (!result.success) {
+      setAssignError(result.error || 'Failed to deploy team.');
+      return;
+    }
     setAssignModalIncident(null);
     setSelectedTeamId('');
   };
 
   const handleSaveOccupancy = (shelterId: string) => {
-    updateShelterOccupancy(shelterId, newOccupancyValue);
+    setOccupancyEditError(null);
+    const res = updateShelterOccupancy(shelterId, newOccupancyValue);
+    if (!res.success) {
+      setOccupancyEditError(res.error || 'Occupancy exceeds capacity.');
+      return;
+    }
     setEditingShelterId(null);
+  };
+
+  const handleAddShelterSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setShelterFormError(null);
+    setShelterFormSuccess(null);
+
+    const res = addShelter({
+      name: shelterName,
+      address: shelterAddress,
+      district: 'East Godavari Simulation Sector',
+      lat: 16.989 + (Math.random() - 0.5) * 0.02,
+      lng: 81.784 + (Math.random() - 0.5) * 0.02,
+      capacity: shelterCapacity,
+      currentOccupancy: shelterOccupancy,
+      contactPerson: shelterContactPerson || 'Shelter Administrator',
+      contactPhone: shelterPhone,
+      facilities: ['Drinking Water', 'Generator Power', 'First Aid', 'Restrooms'],
+    });
+
+    if (!res.success) {
+      setShelterFormError(res.error || 'Failed to create shelter.');
+      return;
+    }
+
+    setShelterFormSuccess(`Shelter "${shelterName}" successfully registered and operational.`);
+    setShelterName('');
+    setShelterAddress('');
+    setShelterPhone('');
+    setShelterContactPerson('');
+    setShelterOccupancy(0);
+    setShelterCapacity(500);
+    setTimeout(() => {
+      setIsAddShelterOpen(false);
+      setShelterFormSuccess(null);
+    }, 1200);
+  };
+
+  const handleConfirmLinkDuplicate = () => {
+    if (!linkingIncident || !targetPrimaryId) return;
+    const res = linkDuplicateToPrimary(linkingIncident.id, targetPrimaryId);
+    if (!res.success) {
+      setDuplicateActionFeedback(`Error: ${res.error}`);
+      return;
+    }
+    setDuplicateActionFeedback(`Report ${linkingIncident.id} linked as duplicate to ${targetPrimaryId}.`);
+    setLinkingIncident(null);
+    setTargetPrimaryId('');
+    setTimeout(() => setDuplicateActionFeedback(null), 2500);
+  };
+
+  const handleKeepDistinctAction = (incidentId: string) => {
+    const res = keepIncidentDistinct(incidentId);
+    if (!res.success) {
+      setDuplicateActionFeedback(`Error: ${res.error}`);
+      return;
+    }
+    setDuplicateActionFeedback(`Incident ${incidentId} confirmed as distinct incident.`);
+    setTimeout(() => setDuplicateActionFeedback(null), 2500);
+  };
+
+  const handleExecuteAllocation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!matchingRequest || !selectedResourceId) return;
+    setMatchingError(null);
+    setIsMatchingSubmitting(true);
+
+    const officerName = user?.fullName || 'District Relief Command Officer';
+    const res = await matchAndAllocateResource(
+      matchingRequest.id,
+      selectedResourceId,
+      quantityToAllocate,
+      officerName
+    );
+
+    setIsMatchingSubmitting(false);
+
+    if (!res.success) {
+      setMatchingError(res.error || 'Failed to allocate relief resources.');
+      return;
+    }
+
+    setMatchingSuccess(
+      `Successfully allocated ${quantityToAllocate} units to request ${matchingRequest.id}. Available inventory has been deducted.`
+    );
+    setTimeout(() => {
+      setMatchingRequest(null);
+      setSelectedResourceId('');
+      setMatchingSuccess(null);
+    }, 1400);
   };
 
   return (
@@ -105,18 +235,17 @@ export const AuthorityPortal: React.FC = () => {
               AUTHORITY & RESPONDER COMMAND
             </span>
             <span className="text-slate-300">|</span>
-            <span className="text-xs text-slate-500">Incident Command System (ICS)</span>
+            <span className="text-xs text-slate-500">ResQsphere Incident Command System</span>
           </div>
           <h1 className="text-2xl font-extrabold text-slate-900 font-sans tracking-tight mt-0.5">
             Operational Disaster Coordination & Logistics
           </h1>
         </div>
 
-        {/* Demo Mode Notice Banner if needed */}
         {mode === 'demo' && (
           <div className="flex items-center gap-2 bg-amber-50 border border-amber-300 text-amber-900 px-3 py-1.5 rounded-xl text-xs font-medium">
             <Sparkles className="w-4 h-4 text-amber-600" />
-            <span>Interactive Demo Dataset Loaded</span>
+            <span>Interactive Demo Scenario Active</span>
             <button
               onClick={resetScenario}
               className="ml-2 font-bold underline hover:text-amber-950"
@@ -207,7 +336,7 @@ export const AuthorityPortal: React.FC = () => {
                   {stats.peopleInShelters.toLocaleString()}
                 </span>
                 <span className="text-[11px] text-emerald-700 font-semibold mt-1 inline-flex items-center gap-1">
-                  <span>Across {shelters.length} safe camps</span>
+                  <span>Across {shelters.length} active safe camps</span>
                 </span>
               </div>
               <div className="h-12 w-12 rounded-2xl bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center">
@@ -240,7 +369,7 @@ export const AuthorityPortal: React.FC = () => {
               <div>
                 <h2 className="text-base font-bold text-slate-900">Live Incident & Response Geospatial Map</h2>
                 <p className="text-xs text-slate-500">
-                  Shared real-time tactical overview showing verified incidents, assigned teams, and shelter capacities.
+                  Real-time tactical overview showing verified incidents, assigned teams, and shelter capacities.
                 </p>
               </div>
               <button
@@ -279,63 +408,49 @@ export const AuthorityPortal: React.FC = () => {
 
               <div className="mt-3 space-y-2.5">
                 {pendingIncidents.slice(0, 3).map((inc) => (
-                  <div key={inc.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 text-xs flex justify-between items-center">
+                  <div
+                    key={inc.id}
+                    className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs"
+                  >
                     <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-[10px] font-bold text-slate-500">{inc.id}</span>
-                        <span className="font-bold text-slate-900">{inc.title}</span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 mt-0.5">{inc.location}</p>
+                      <div className="font-bold text-slate-900">{inc.title}</div>
+                      <div className="text-[11px] text-slate-500">📍 {inc.location}</div>
                     </div>
-                    <div className="flex gap-1.5 shrink-0">
-                      <button
-                        onClick={() => verifyIncident(inc.id, 'verified')}
-                        className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg"
-                        title="Verify"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => verifyIncident(inc.id, 'rejected')}
-                        className="p-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg"
-                        title="Reject"
-                      >
-                        <XCircle className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => setAuthoritySection('verification')}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-700 text-white font-semibold text-[11px]"
+                    >
+                      Verify
+                    </button>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Quick Team Status Overview */}
+            {/* Quick Response Team Overview */}
             <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div className="flex items-center gap-2">
                   <Truck className="w-4 h-4 text-sky-700" />
-                  <h3 className="font-bold text-sm text-slate-900">Deployed Response Teams</h3>
+                  <h3 className="font-bold text-sm text-slate-900">Response Team Deployments</h3>
                 </div>
                 <button
                   onClick={() => setAuthoritySection('teams')}
-                  className="text-xs text-sky-800 font-semibold hover:underline"
+                  className="text-xs text-emerald-800 font-semibold hover:underline"
                 >
-                  Manage Roster ({responseTeams.length})
+                  Manage Teams ({responseTeams.length})
                 </button>
               </div>
 
               <div className="mt-3 space-y-2.5">
                 {responseTeams.slice(0, 3).map((team) => (
-                  <div key={team.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 text-xs flex justify-between items-center">
+                  <div
+                    key={team.id}
+                    className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs"
+                  >
                     <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-900">{team.name}</span>
-                        <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-sky-100 text-sky-800 uppercase font-bold">
-                          {team.agency}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        {team.currentIncidentTitle || 'Standing by at base'}
-                      </p>
+                      <div className="font-bold text-slate-900">{team.name}</div>
+                      <div className="text-[11px] text-slate-500">{team.agency} · {team.leader}</div>
                     </div>
                     <span
                       className={`text-[9px] font-bold px-2 py-0.5 rounded capitalize ${
@@ -374,9 +489,7 @@ export const AuthorityPortal: React.FC = () => {
               <h2 className="text-base font-bold text-slate-900">
                 Pending Incident Verification Queue ({pendingIncidents.length})
               </h2>
-              <span className="text-xs text-slate-500">
-                Showing submissions requiring review
-              </span>
+              <span className="text-xs text-slate-500">Showing submissions requiring review</span>
             </div>
 
             {pendingIncidents.length > 0 ? (
@@ -415,33 +528,31 @@ export const AuthorityPortal: React.FC = () => {
                         </span>
                         <span>Reported by: <strong>{inc.reportedBy}</strong></span>
                         {inc.peopleTrapped ? (
-                          <span className="text-red-700 font-bold">
-                            ⚠️ {inc.peopleTrapped} people trapped
-                          </span>
+                          <span className="text-red-700 font-bold">⚠️ {inc.peopleTrapped} people trapped</span>
                         ) : null}
                       </div>
                     </div>
 
-                    <div className="flex sm:flex-col items-center sm:items-end gap-2 shrink-0">
+                    <div className="flex flex-col sm:flex-row items-center gap-2 shrink-0">
                       <button
-                        onClick={() => verifyIncident(inc.id, 'verified')}
-                        className="w-full py-2 px-4 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center justify-center gap-1.5"
+                        onClick={() => verifyIncident(inc.id, 'verified', 'Confirmed by Duty Operations Officer')}
+                        className="w-full sm:w-auto py-2 px-4 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-xs"
                       >
                         <CheckCircle className="w-4 h-4" />
                         <span>Verify Incident</span>
                       </button>
 
                       <button
-                        onClick={() => verifyIncident(inc.id, 'rejected')}
-                        className="w-full py-1.5 px-4 bg-white hover:bg-red-50 text-red-700 border border-red-300 rounded-xl text-xs font-semibold transition flex items-center justify-center gap-1.5"
+                        onClick={() => verifyIncident(inc.id, 'rejected', 'Rejected: Duplicate / Insufficient grounding')}
+                        className="w-full sm:w-auto py-2 px-3 bg-white border border-red-200 hover:bg-red-50 text-red-700 rounded-xl text-xs font-semibold transition flex items-center justify-center gap-1"
                       >
                         <XCircle className="w-4 h-4" />
-                        <span>Reject / False</span>
+                        <span>Reject</span>
                       </button>
 
                       <button
                         onClick={() => setAssignModalIncident(inc)}
-                        className="w-full py-1.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-medium transition"
+                        className="w-full sm:w-auto py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-medium transition"
                       >
                         Assign Team
                       </button>
@@ -460,20 +571,27 @@ export const AuthorityPortal: React.FC = () => {
         </div>
       )}
 
-      {/* SECTION 3: DUPLICATE / POTENTIAL DUPLICATE REVIEW */}
+      {/* SECTION 3: DUPLICATE REVIEW (Requirement 8) */}
       {authoritySection === 'duplicates' && (
         <div className="space-y-4">
+          {duplicateActionFeedback && (
+            <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 text-emerald-600" />
+              <span>{duplicateActionFeedback}</span>
+            </div>
+          )}
+
           <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
             <div>
               <h2 className="text-base font-bold text-slate-900">Duplicate Report Cluster Review</h2>
               <p className="text-xs text-slate-500">
-                Flagged reports with overlapping GPS coordinates, similar timestamps, and identical incident types. Link them to consolidate responder dispatch without deleting original records.
+                Flagged submissions with overlapping geographic coordinates or identical incident types. Associate duplicates with the primary incident cluster or confirm them as distinct.
               </p>
             </div>
 
-            {duplicateIncidents.length > 0 ? (
+            {unresolvedDuplicates.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                {duplicateIncidents.map((inc) => (
+                {unresolvedDuplicates.map((inc) => (
                   <div key={inc.id} className="p-5 rounded-2xl border border-amber-200 bg-amber-50/40 text-xs space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="font-mono font-bold text-slate-600">{inc.id}</span>
@@ -492,17 +610,27 @@ export const AuthorityPortal: React.FC = () => {
                     </div>
 
                     <div className="pt-2 flex gap-2">
+                      {/* Action 1: Link to Primary Cluster */}
                       <button
-                        onClick={() => markPotentialDuplicate(inc.id, 'INC-2026-087')}
-                        className="flex-1 py-2 bg-amber-700 hover:bg-amber-800 text-white rounded-xl text-xs font-semibold"
+                        onClick={() => {
+                          setLinkingIncident(inc);
+                          // Default to first verified incident not equal to inc.id
+                          const firstOther = incidents.find((i) => i.id !== inc.id);
+                          if (firstOther) setTargetPrimaryId(firstOther.id);
+                        }}
+                        className="flex-1 py-2 bg-amber-700 hover:bg-amber-800 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition"
                       >
-                        Link to Primary Cluster
+                        <Link2 className="w-3.5 h-3.5" />
+                        <span>Link to Primary Cluster</span>
                       </button>
+
+                      {/* Action 2: Keep Distinct */}
                       <button
-                        onClick={() => verifyIncident(inc.id, 'verified')}
-                        className="py-2 px-3 bg-white border border-slate-300 text-slate-700 rounded-xl text-xs font-medium hover:bg-slate-50"
+                        onClick={() => handleKeepDistinctAction(inc.id)}
+                        className="py-2 px-3 bg-white border border-slate-300 text-slate-700 rounded-xl text-xs font-medium hover:bg-slate-50 flex items-center gap-1 transition"
                       >
-                        Keep Distinct
+                        <GitFork className="w-3.5 h-3.5" />
+                        <span>Keep Distinct</span>
                       </button>
                     </div>
                   </div>
@@ -512,41 +640,41 @@ export const AuthorityPortal: React.FC = () => {
               <div className="py-12 text-center text-xs text-slate-500 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
                 <CheckCircle className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
                 <p className="font-bold text-slate-800 text-sm">No Unresolved Duplicate Clusters</p>
-                <p className="mt-1">All geographically adjacent reports have been resolved.</p>
+                <p className="mt-1">All geographically adjacent reports have been reviewed and verified.</p>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* SECTION 4: LIVE INCIDENT MAP */}
-      {authoritySection === 'map' && (
-        <div className="space-y-4">
-          <DisasterMap
-            incidents={incidents}
-            shelters={shelters}
-            height="580px"
-            title="Operational GIS Incident & Shelter Map"
-            onSelectIncident={(inc) => setSelectedIncident(inc)}
-          />
-        </div>
-      )}
-
-      {/* SECTION 5: SHELTER MANAGEMENT & OCCUPANCY */}
+      {/* SECTION 4: SHELTER MANAGEMENT (Requirement 6: Add Shelter option) */}
       {authoritySection === 'shelters' && (
         <div className="space-y-4">
           <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
               <div>
-                <h2 className="text-base font-bold text-slate-900">Shelter Network & Occupancy Management</h2>
+                <h2 className="text-base font-bold text-slate-900">Evacuation Shelter Network & Occupancy</h2>
                 <p className="text-xs text-slate-500">
-                  Total Shelter Capacity: {shelters.reduce((acc, s) => acc + s.capacity, 0).toLocaleString()} | Current Total Occupancy: {stats.peopleInShelters.toLocaleString()}
+                  {stats.peopleInShelters.toLocaleString()} current evacuees across {shelters.length} active safe facilities
                 </p>
               </div>
-              <span className="text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl">
-                Changes dynamically update Overview stats
-              </span>
+
+              {/* Requirement 6: Add Shelter Button */}
+              <button
+                onClick={() => setIsAddShelterOpen(true)}
+                className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Shelter</span>
+              </button>
             </div>
+
+            {occupancyEditError && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-800 rounded-xl text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                <span>{occupancyEditError}</span>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               {shelters.map((shelter) => (
@@ -570,7 +698,6 @@ export const AuthorityPortal: React.FC = () => {
                     <h3 className="font-bold text-sm text-slate-900">{shelter.name}</h3>
                     <p className="text-xs text-slate-500 mt-1">{shelter.address}</p>
 
-                    {/* Occupancy stats */}
                     <div className="mt-4 pt-3 border-t border-slate-200 space-y-2">
                       <div className="flex justify-between text-xs font-semibold text-slate-700">
                         <span>Current Evacuees:</span>
@@ -579,7 +706,13 @@ export const AuthorityPortal: React.FC = () => {
 
                       <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
                         <div
-                          className="h-full rounded-full bg-emerald-600"
+                          className={`h-full rounded-full ${
+                            shelter.currentOccupancy >= shelter.capacity
+                              ? 'bg-purple-600'
+                              : shelter.currentOccupancy >= shelter.capacity * 0.85
+                              ? 'bg-amber-500'
+                              : 'bg-emerald-600'
+                          }`}
                           style={{
                             width: `${Math.min(100, Math.round((shelter.currentOccupancy / shelter.capacity) * 100))}%`,
                           }}
@@ -592,7 +725,9 @@ export const AuthorityPortal: React.FC = () => {
                   <div className="mt-4 pt-3 border-t border-slate-200 text-xs">
                     {editingShelterId === shelter.id ? (
                       <div className="space-y-2">
-                        <label className="block text-[11px] font-semibold text-slate-700">Update Headcount:</label>
+                        <div className="flex justify-between text-[11px] font-semibold text-slate-700">
+                          <span>Set Headcount (Max {shelter.capacity}):</span>
+                        </div>
                         <div className="flex gap-2">
                           <input
                             type="number"
@@ -607,6 +742,12 @@ export const AuthorityPortal: React.FC = () => {
                             className="px-3 py-1 bg-emerald-700 text-white rounded-lg font-bold"
                           >
                             Save
+                          </button>
+                          <button
+                            onClick={() => setEditingShelterId(null)}
+                            className="px-2 py-1 text-slate-500 hover:text-slate-800"
+                          >
+                            Cancel
                           </button>
                         </div>
                       </div>
@@ -632,7 +773,7 @@ export const AuthorityPortal: React.FC = () => {
         </div>
       )}
 
-      {/* SECTION 6: RESPONSE TEAM MANAGEMENT & ASSIGNMENTS */}
+      {/* SECTION 5: RESPONSE TEAMS (Requirement 7: Prevent Repeat Deployment) */}
       {authoritySection === 'teams' && (
         <div className="space-y-4">
           <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
@@ -646,80 +787,96 @@ export const AuthorityPortal: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {responseTeams.map((team) => (
-                <div key={team.id} className="bg-slate-50 rounded-2xl border border-slate-200 p-5 flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-bold text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-sky-100 text-sky-800">
-                        {team.agency}
-                      </span>
-                      <span
-                        className={`text-[9px] font-bold px-2 py-0.5 rounded capitalize ${
-                          team.status === 'deployed'
-                            ? 'bg-amber-100 text-amber-800'
-                            : team.status === 'available'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : 'bg-slate-200 text-slate-700'
-                        }`}
-                      >
-                        {team.status}
-                      </span>
-                    </div>
+              {responseTeams.map((team) => {
+                const isAlreadyDeployed = team.status === 'deployed' || team.status === 'on_site';
 
-                    <h3 className="font-bold text-sm text-slate-900">{team.name}</h3>
-                    <p className="text-xs text-slate-500 mt-1">Leader: {team.leader} ({team.membersCount} crew)</p>
-                    <p className="text-[11px] text-slate-500 mt-0.5">Base: {team.baseLocation}</p>
-
-                    {team.currentIncidentTitle && (
-                      <div className="mt-3 p-2 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900">
-                        <span className="font-bold block text-[10px] uppercase text-amber-700">Current Assignment:</span>
-                        <p className="mt-0.5 font-medium">{team.currentIncidentTitle}</p>
-                      </div>
-                    )}
-
-                    <div className="mt-3 flex flex-wrap gap-1">
-                      {team.specialties.map((s, i) => (
-                        <span key={i} className="text-[10px] bg-white border border-slate-200 px-2 py-0.5 rounded-md text-slate-600">
-                          {s}
+                return (
+                  <div key={team.id} className="bg-slate-50 rounded-2xl border border-slate-200 p-5 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-bold text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-sky-100 text-sky-800">
+                          {team.agency}
                         </span>
-                      ))}
+                        <span
+                          className={`text-[9px] font-bold px-2 py-0.5 rounded capitalize ${
+                            isAlreadyDeployed
+                              ? 'bg-amber-100 text-amber-800'
+                              : team.status === 'available'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-slate-200 text-slate-700'
+                          }`}
+                        >
+                          {isAlreadyDeployed ? 'Deployed / On Site' : team.status}
+                        </span>
+                      </div>
+
+                      <h3 className="font-bold text-sm text-slate-900">{team.name}</h3>
+                      <p className="text-xs text-slate-500 mt-1">Leader: {team.leader} ({team.membersCount} crew)</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">Base: {team.baseLocation}</p>
+
+                      {team.currentIncidentTitle && (
+                        <div className="mt-3 p-2 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900">
+                          <span className="font-bold block text-[10px] uppercase text-amber-700">Active Incident:</span>
+                          <p className="mt-0.5 font-medium">{team.currentIncidentTitle}</p>
+                        </div>
+                      )}
+
+                      <div className="mt-3 flex flex-wrap gap-1">
+                        {team.specialties.map((s, i) => (
+                          <span key={i} className="text-[10px] bg-white border border-slate-200 px-2 py-0.5 rounded-md text-slate-600">
+                            {s}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-slate-200 flex items-center justify-between text-xs">
+                      <span className="text-slate-500">{team.contactPhone}</span>
+
+                      {/* Requirement 7: Prevent repeat deployment of response teams */}
+                      {isAlreadyDeployed ? (
+                        <button
+                          disabled
+                          className="px-2.5 py-1 bg-slate-200 text-slate-400 rounded-lg font-semibold cursor-not-allowed text-xs"
+                          title="Team is already deployed to an active incident"
+                        >
+                          Already Deployed
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            const verifiedUnassigned = incidents.find(
+                              (inc) => (inc.status === 'verified' || inc.status === 'pending_verification') && !inc.assignedTeamId
+                            );
+                            if (verifiedUnassigned) {
+                              setAssignModalIncident(verifiedUnassigned);
+                              setSelectedTeamId(team.id);
+                            } else {
+                              alert('All verified incidents already have response teams dispatched.');
+                            }
+                          }}
+                          className="px-2.5 py-1 bg-[#1B4332] text-white rounded-lg font-semibold hover:bg-[#245740] transition"
+                        >
+                          Deploy to Incident
+                        </button>
+                      )}
                     </div>
                   </div>
-
-                  <div className="mt-4 pt-3 border-t border-slate-200 flex items-center justify-between text-xs">
-                    <span className="text-slate-500">{team.contactPhone}</span>
-                    <button
-                      onClick={() => {
-                        const verifiedUnassigned = incidents.find(
-                          (inc) => (inc.status === 'verified' || inc.status === 'pending_verification') && !inc.assignedTeamId
-                        );
-                        if (verifiedUnassigned) {
-                          setAssignModalIncident(verifiedUnassigned);
-                          setSelectedTeamId(team.id);
-                        } else {
-                          alert('All verified incidents already have teams assigned.');
-                        }
-                      }}
-                      className="px-2.5 py-1 bg-[#1B4332] text-white rounded-lg font-semibold hover:bg-[#245740] transition"
-                    >
-                      Deploy to Incident
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
       )}
 
-      {/* SECTION 7: RESOURCE ALLOCATION */}
+      {/* SECTION 6: RESOURCE ALLOCATION */}
       {authoritySection === 'resources' && (
         <div className="space-y-4">
           <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
             <div>
               <h2 className="text-base font-bold text-slate-900">Relief Resource Reserves & Inventory Pool</h2>
               <p className="text-xs text-slate-500">
-                Supplies committed by accredited partners, ready for dispatch to shelters and isolated citizen clusters.
+                Supplies committed by accredited partners, available for dispatch to shelters and isolated citizen clusters.
               </p>
             </div>
 
@@ -749,243 +906,513 @@ export const AuthorityPortal: React.FC = () => {
         </div>
       )}
 
-      {/* SECTION 8: UNMET NEEDS DETECTION */}
+      {/* SECTION 7: UNMET NEEDS DETECTION & REAL MATCHING WORKFLOW (Requirement 9) */}
       {authoritySection === 'unmet_needs' && (
         <div className="space-y-4">
           <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
             <div>
-              <h2 className="text-base font-bold text-slate-900">Unmet Needs & Unserved-Area Detection</h2>
+              <h2 className="text-base font-bold text-slate-900">Unmet Needs & Relief Allocation Workflow</h2>
               <p className="text-xs text-slate-500">
-                Algorithm-detected clusters of citizen assistance requests that currently lack assigned response teams or relief supplies.
+                Live citizen assistance requests awaiting relief distribution. Match available partner inventory to fulfill requests directly.
               </p>
             </div>
 
             <div className="space-y-3">
-              {assistanceRequests.filter((r) => r.status === 'pending').map((req) => (
-                <div key={req.id} className="p-4 rounded-2xl border border-red-200 bg-red-50/40 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-[10px] font-bold text-slate-600">{req.id}</span>
-                      <span className="bg-red-600 text-white text-[9px] font-bold uppercase px-2 py-0.5 rounded">
-                        Unserved {req.priority}
-                      </span>
-                      <span className="font-semibold text-slate-800">{req.peopleCount} people waiting</span>
+              {assistanceRequests
+                .filter((r) => r.status === 'pending' || r.status === 'partially_fulfilled')
+                .map((req) => {
+                  const rem = req.remainingQuantity ?? req.quantityRequested ?? req.peopleCount;
+                  const ful = req.quantityFulfilled ?? 0;
+                  const reqTot = req.quantityRequested ?? rem;
+
+                  return (
+                    <div
+                      key={req.id}
+                      className="p-4 rounded-2xl border border-red-200 bg-red-50/40 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-[10px] font-bold text-slate-600">{req.id}</span>
+                          <span className="bg-red-600 text-white text-[9px] font-bold uppercase px-2 py-0.5 rounded">
+                            {req.status === 'partially_fulfilled' ? 'Partially Fulfilled' : `Unserved ${req.priority}`}
+                          </span>
+                          <span className="font-semibold text-slate-800">
+                            Need: {rem} {req.unit || 'units'} ({req.peopleCount} people)
+                          </span>
+                          {ful > 0 && (
+                            <span className="text-emerald-700 font-bold text-[10px]">
+                              ({ful}/{reqTot} delivered)
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="font-bold text-slate-900 text-sm">{req.details}</h4>
+                        <p className="text-slate-500">📍 {req.location}</p>
+                      </div>
+
+                      {/* Requirement 9: Dedicated Match Resources Modal Opener */}
+                      <button
+                        onClick={() => {
+                          setMatchingRequest(req);
+                          setMatchingError(null);
+                          setMatchingSuccess(null);
+                          // Default allocation quantity
+                          setQuantityToAllocate(rem);
+                          // Pre-select matching resource if available
+                          const matchingRes = resources.find(
+                            (res) => res.category === req.category && res.quantity > 0
+                          );
+                          if (matchingRes) setSelectedResourceId(matchingRes.id);
+                        }}
+                        className="py-2 px-4 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shrink-0 shadow-xs"
+                      >
+                        <Package className="w-4 h-4" />
+                        <span>Match Resources</span>
+                      </button>
                     </div>
-                    <h4 className="font-bold text-slate-900 text-sm">{req.details}</h4>
-                    <p className="text-slate-500">{req.location}</p>
-                  </div>
-                  <button
-                    onClick={() => setAuthoritySection('resources')}
-                    className="py-1.5 px-3 bg-red-600 text-white rounded-xl text-xs font-bold hover:bg-red-700 transition"
-                  >
-                    Match Resource Now
-                  </button>
-                </div>
-              ))}
+                  );
+                })}
             </div>
           </div>
         </div>
       )}
 
-      {/* SECTION 9: RISK MONITORING */}
+      {/* SECTION 8: RISK MONITORING & SITUATION OVERVIEW COMBINED (Requirement 10) */}
       {authoritySection === 'risk' && (
-        <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-6">
-          <div>
-            <h2 className="text-base font-bold text-slate-900">River Basin Telemetry & Hydrological Risk</h2>
-            <p className="text-xs text-slate-500">
-              Live gauges and sensor monitoring at Godavari Basin reservoirs and embankments.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-              <span className="text-[11px] font-bold text-slate-400 uppercase">Dowleswaram Barrage Gauge</span>
-              <div className="text-3xl font-extrabold text-red-600 font-mono">14.85 m</div>
-              <p className="text-xs text-slate-600">Danger Mark: 15.00 m (15cm buffer)</p>
-              <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden mt-2">
-                <div className="bg-red-600 h-full w-[95%]" />
+        <div className="space-y-6">
+          {/* Situation Overview Brief Banner (Merged from Situation Overview) */}
+          <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
+            <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100">
+              <FileText className="w-5 h-5 text-emerald-800" />
+              <div>
+                <h2 className="text-base font-bold text-slate-900">Executive Incident Situation Report (SITREP)</h2>
+                <p className="text-xs text-slate-500">
+                  Unified command briefing for District Magistrate & State Disaster Management Authority
+                </p>
               </div>
             </div>
 
-            <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-              <span className="text-[11px] font-bold text-slate-400 uppercase">24-Hour Catchment Rainfall</span>
-              <div className="text-3xl font-extrabold text-slate-900 font-mono">182 mm</div>
-              <p className="text-xs text-slate-600">Category: Extremely Heavy Rain (IMD)</p>
-              <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden mt-2">
-                <div className="bg-amber-600 h-full w-[85%]" />
-              </div>
-            </div>
-
-            <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-              <span className="text-[11px] font-bold text-slate-400 uppercase">Current Water Discharge</span>
-              <div className="text-3xl font-extrabold text-slate-900 font-mono">2.18 L Cusecs</div>
-              <p className="text-xs text-slate-600">Status: All 175 gates raised to level 3</p>
-              <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden mt-2">
-                <div className="bg-emerald-600 h-full w-[70%]" />
-              </div>
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2 text-xs leading-relaxed text-slate-700">
+              <p>
+                <strong>Operational Situation:</strong> Cloudburst activity over the upper Godavari catchment has raised river discharge at the Dowleswaram Barrage to 2.18 lakh cusecs. All 175 gates have been lifted to Level 3. A localized breach on the canal embankment at Kovvur has impacted 32 families, where NDRF Swift Water Team Alpha is currently executing evacuation ops.
+              </p>
+              <p>
+                <strong>Shelter & Medical Status:</strong> {shelters.length} designated shelters are active with {stats.peopleInShelters.toLocaleString()} evacuees. District Hospital emergency wing has active mobile diesel generators deployed. State Highway 42 has traffic diversions due to localized waterlogging.
+              </p>
             </div>
           </div>
-        </div>
-      )}
 
-      {/* SECTION 10: SITUATION OVERVIEW */}
-      {authoritySection === 'situation' && (
-        <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-6">
-          <div>
-            <h2 className="text-base font-bold text-slate-900">District Incident Situation Overview</h2>
-            <p className="text-xs text-slate-500">
-              Composite summary for District Magistrate and State Disaster Management Commissioner.
-            </p>
-          </div>
-
-          <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3 text-xs leading-relaxed text-slate-700">
-            <h3 className="font-bold text-slate-900 text-sm">Operational Situation Brief — 10:30 hrs</h3>
-            <p>
-              Following sustained cloudburst over upper Godavari catchment, water discharge at the barrage has climbed to 2.18 lakh cusecs. A localized breach on the canal embankment at Kovvur has affected 32 families, where NDRF Team Alpha is currently executing boat evacuations.
-            </p>
-            <p>
-              Six designated safe shelters are active, housing 1,930 evacuees with active community kitchens and medical posts. Primary hospital oxygen backup has been reinforced with a mobile generator crew. Traffic on State Highway 42 remains diverted following a mudslide at Kadiyam ghat.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* SECTION 11: REPORTS & ANALYTICS */}
-      {authoritySection === 'analytics' && (
-        <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-6">
-          <div>
-            <h2 className="text-base font-bold text-slate-900">Disaster Response Analytics</h2>
-            <p className="text-xs text-slate-500">
-              Key performance indicators derived directly from active scenario records.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-center">
-              <span className="text-[10px] font-bold text-slate-400 uppercase">Avg Response Time</span>
-              <div className="text-2xl font-bold text-slate-900 mt-1">18 mins</div>
-              <span className="text-[10px] text-emerald-700 font-semibold mt-1 block">Within NDRF 30-min SLA</span>
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-center">
-              <span className="text-[10px] font-bold text-slate-400 uppercase">Shelter Occupancy Rate</span>
-              <div className="text-2xl font-bold text-slate-900 mt-1">
-                {Math.round((stats.peopleInShelters / shelters.reduce((a, s) => a + s.capacity, 0)) * 100)}%
-              </div>
-              <span className="text-[10px] text-slate-500 mt-1 block">Capacity buffer adequate</span>
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-center">
-              <span className="text-[10px] font-bold text-slate-400 uppercase">Assistance Fulfillment</span>
-              <div className="text-2xl font-bold text-slate-900 mt-1">62%</div>
-              <span className="text-[10px] text-amber-700 font-semibold mt-1 block">Active matching in progress</span>
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-center">
-              <span className="text-[10px] font-bold text-slate-400 uppercase">Verified Incidents</span>
-              <div className="text-2xl font-bold text-slate-900 mt-1">
-                {incidents.filter((i) => i.status === 'verified' || i.status === 'in_progress').length}
-              </div>
-              <span className="text-[10px] text-emerald-700 font-semibold mt-1 block">Active deployments</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* SECTION 12: INTEGRATION STATUS */}
-      {authoritySection === 'integrations' && (
-        <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-6">
-          <div>
-            <h2 className="text-base font-bold text-slate-900">System Integration & Connectivity State</h2>
-            <p className="text-xs text-slate-500">
-              Live checks of external telemetry providers, databases, and alerting channels.
-            </p>
-          </div>
-
-          <div className="space-y-3">
-            {/* Supabase status */}
-            <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-between text-xs">
-              <div className="flex items-center gap-3">
-                <div className={`h-3 w-3 rounded-full ${supabaseStatus.status === 'connected' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                <div>
-                  <h4 className="font-bold text-slate-900">Supabase Cloud PostgreSQL Database</h4>
-                  <p className="text-slate-500 text-[11px]">{supabaseStatus.message}</p>
-                </div>
-              </div>
-              <span className="font-mono text-[11px] text-slate-500">{supabaseStatus.url}</span>
-            </div>
-
-            {/* Weather status */}
-            <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-between text-xs">
-              <div className="flex items-center gap-3">
-                <div className="h-3 w-3 rounded-full bg-emerald-500" />
-                <div>
-                  <h4 className="font-bold text-slate-900">Open-Meteo Weather API Integration</h4>
-                  <p className="text-slate-500 text-[11px]">Active real-time forecast feed (WMO standard)</p>
-                </div>
-              </div>
-              <span className="font-mono text-[11px] text-emerald-700 font-semibold">Live Telemetry Active</span>
-            </div>
-
-            {/* ERSS 112 status */}
-            <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-between text-xs">
-              <div className="flex items-center gap-3">
-                <div className="h-3 w-3 rounded-full bg-emerald-500" />
-                <div>
-                  <h4 className="font-bold text-slate-900">National Emergency Helpline (ERSS 112)</h4>
-                  <p className="text-slate-500 text-[11px]">Dialer integration configured for India</p>
-                </div>
-              </div>
-              <span className="font-mono text-[11px] text-slate-700">tel:112 Link Ready</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TEAM ASSIGNMENT MODAL */}
-      {assignModalIncident && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+          {/* Hydrological Telemetry & Gauges */}
+          <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-6">
             <div>
-              <span className="text-[10px] font-bold font-mono text-emerald-800 uppercase">
-                DISPATCH COORDINATION
-              </span>
-              <h3 className="text-base font-bold text-slate-900 mt-1">Assign Response Team</h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Assign an available responder unit to <strong>{assignModalIncident.id}</strong> ({assignModalIncident.title}).
+              <h2 className="text-base font-bold text-slate-900">River Basin Telemetry & Hydrological Risk</h2>
+              <p className="text-xs text-slate-500">
+                Live gauges and sensor monitoring at Godavari Basin reservoirs and embankments.
               </p>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Select Available Unit</label>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                <span className="text-[11px] font-bold text-slate-400 uppercase">Dowleswaram Barrage Gauge</span>
+                <div className="text-3xl font-extrabold text-red-600 font-mono">14.85 m</div>
+                <p className="text-xs text-slate-600">Danger Mark: 15.00 m (15cm buffer)</p>
+                <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden mt-2">
+                  <div className="bg-red-600 h-full w-[95%]" />
+                </div>
+              </div>
+
+              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                <span className="text-[11px] font-bold text-slate-400 uppercase">24-Hour Catchment Rainfall</span>
+                <div className="text-3xl font-extrabold text-slate-900 font-mono">182 mm</div>
+                <p className="text-xs text-slate-600">Category: Extremely Heavy Rain (IMD)</p>
+                <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden mt-2">
+                  <div className="bg-amber-600 h-full w-[85%]" />
+                </div>
+              </div>
+
+              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                <span className="text-[11px] font-bold text-slate-400 uppercase">Current Water Discharge</span>
+                <div className="text-3xl font-extrabold text-slate-900 font-mono">2.18 L Cusecs</div>
+                <p className="text-xs text-slate-600">Status: All 175 gates raised to level 3</p>
+                <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden mt-2">
+                  <div className="bg-emerald-600 h-full w-[70%]" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 1: ADD SHELTER (Requirement 6) */}
+      {isAddShelterOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 p-6 relative">
+            <button
+              onClick={() => setIsAddShelterOpen(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 p-1 rounded-full hover:bg-slate-100"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 pb-4 border-b border-slate-100 mb-4">
+              <div className="h-10 w-10 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                <Home className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-slate-900">Add Evacuation Shelter</h3>
+                <p className="text-xs text-slate-500">Register new designated cyclone/flood relief camp</p>
+              </div>
+            </div>
+
+            {shelterFormError && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-800 rounded-xl text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                <span>{shelterFormError}</span>
+              </div>
+            )}
+
+            {shelterFormSuccess && (
+              <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{shelterFormSuccess}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleAddShelterSubmit} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Shelter Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={shelterName}
+                  onChange={(e) => setShelterName(e.target.value)}
+                  placeholder="e.g. Zilla Parishad Model High School Shelter"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Location / Address *</label>
+                <input
+                  type="text"
+                  required
+                  value={shelterAddress}
+                  onChange={(e) => setShelterAddress(e.target.value)}
+                  placeholder="e.g. Near Bus Stand, High Grounds, Kovvur"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Maximum Capacity *</label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={shelterCapacity}
+                    onChange={(e) => setShelterCapacity(parseInt(e.target.value) || 0)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Current Occupancy *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={shelterOccupancy}
+                    onChange={(e) => setShelterOccupancy(parseInt(e.target.value) || 0)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                  />
+                  <span className="text-[10px] text-slate-400">Must not exceed capacity</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Camp Administrator *</label>
+                  <input
+                    type="text"
+                    required
+                    value={shelterContactPerson}
+                    onChange={(e) => setShelterContactPerson(e.target.value)}
+                    placeholder="e.g. M. Rama Rao, Tahsildar"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Contact Mobile Number (10-Digit Indian Mobile) *
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={shelterPhone}
+                    onChange={(e) => setShelterPhone(e.target.value)}
+                    placeholder="+91 98480 12345"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddShelterOpen(false)}
+                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-5 py-2 rounded-xl shadow-xs"
+                >
+                  Save Shelter
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: LINK TO PRIMARY CLUSTER (Requirement 8) */}
+      {linkingIncident && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 p-6 relative">
+            <button
+              onClick={() => setLinkingIncident(null)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 p-1 rounded-full"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className="font-bold text-base text-slate-900 mb-1">Link to Primary Incident Cluster</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Associate report <strong>{linkingIncident.id}</strong> ({linkingIncident.title}) with the master incident:
+            </p>
+
+            <div className="space-y-3 text-xs">
+              <label className="block font-semibold text-slate-700">Select Master Incident:</label>
+              <select
+                value={targetPrimaryId}
+                onChange={(e) => setTargetPrimaryId(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-300 text-xs bg-white"
+              >
+                {incidents
+                  .filter((i) => i.id !== linkingIncident.id)
+                  .map((inc) => (
+                    <option key={inc.id} value={inc.id}>
+                      {inc.id} — {inc.title} ({inc.location})
+                    </option>
+                  ))}
+              </select>
+
+              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-[11px]">
+                Note: The original report will be preserved with full history and linked to the master response dispatch.
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  onClick={() => setLinkingIncident(null)}
+                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmLinkDuplicate}
+                  className="bg-amber-700 hover:bg-amber-800 text-white font-bold px-5 py-2 rounded-xl"
+                >
+                  Confirm Link
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: MATCH RESOURCES WORKFLOW (Requirement 9) */}
+      {matchingRequest && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-xl w-full shadow-2xl border border-slate-200 p-6 relative">
+            <button
+              onClick={() => setMatchingRequest(null)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 p-1 rounded-full hover:bg-slate-100"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 pb-3 border-b border-slate-100 mb-4">
+              <div className="h-10 w-10 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                <Package className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-slate-900">Relief Resource Allocation Workflow</h3>
+                <p className="text-xs text-slate-500">Match active requests to partner stock reserves</p>
+              </div>
+            </div>
+
+            {matchingError && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-800 rounded-xl text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                <span>{matchingError}</span>
+              </div>
+            )}
+
+            {matchingSuccess && (
+              <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{matchingSuccess}</span>
+              </div>
+            )}
+
+            {/* Request Summary Card */}
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-xs space-y-1.5 mb-4">
+              <div className="flex justify-between items-center">
+                <span className="font-mono font-bold text-slate-700">{matchingRequest.id}</span>
+                <span className="capitalize px-2 py-0.5 rounded-full bg-slate-200 font-semibold text-[10px]">
+                  {matchingRequest.category}
+                </span>
+              </div>
+              <h4 className="font-bold text-slate-900">{matchingRequest.details}</h4>
+              <p className="text-slate-500">📍 {matchingRequest.location}</p>
+              <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200 text-[11px]">
+                <div>
+                  <span className="text-slate-400 block">Requested Total</span>
+                  <span className="font-bold text-slate-800">
+                    {matchingRequest.quantityRequested || matchingRequest.peopleCount} {matchingRequest.unit || 'units'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">Already Fulfilled</span>
+                  <span className="font-bold text-emerald-700">
+                    {matchingRequest.quantityFulfilled || 0} {matchingRequest.unit || 'units'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">Remaining Need</span>
+                  <span className="font-bold text-red-700">
+                    {matchingRequest.remainingQuantity ?? matchingRequest.quantityRequested ?? matchingRequest.peopleCount} {matchingRequest.unit || 'units'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <form onSubmit={handleExecuteAllocation} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Select Compatible Partner Inventory *
+                </label>
+                <select
+                  required
+                  value={selectedResourceId}
+                  onChange={(e) => setSelectedResourceId(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs bg-white"
+                >
+                  <option value="">-- Choose Stock Lot --</option>
+                  {resources.map((res) => (
+                    <option key={res.id} value={res.id} disabled={res.quantity <= 0}>
+                      {res.itemName} — {res.quantity} {res.unit} available ({res.partnerName})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Quantity to Allocate and Dispatch *
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  required
+                  value={quantityToAllocate}
+                  onChange={(e) => setQuantityToAllocate(parseInt(e.target.value) || 0)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"
+                />
+                <span className="text-[10px] text-slate-400 block mt-1">
+                  Example: 450 available, allocate 50 → Remaining stock will become 400.
+                </span>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMatchingRequest(null)}
+                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isMatchingSubmitting || !selectedResourceId}
+                  className="bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-xl shadow-xs transition"
+                >
+                  {isMatchingSubmitting ? 'Allocating...' : 'Confirm Allocation & Deduct Stock'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: TEAM ASSIGNMENT */}
+      {assignModalIncident && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 p-6 relative">
+            <button
+              onClick={() => setAssignModalIncident(null)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 p-1 rounded-full"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h3 className="font-bold text-base text-slate-900 mb-1">Deploy Response Team</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Assign tactical unit to: <strong>{assignModalIncident.title}</strong>
+            </p>
+
+            {assignError && (
+              <div className="mb-3 p-2.5 bg-red-50 border border-red-200 text-red-800 rounded-xl text-xs">
+                {assignError}
+              </div>
+            )}
+
+            <div className="space-y-3 text-xs">
+              <label className="block font-semibold text-slate-700">Available Response Units:</label>
               <select
                 value={selectedTeamId}
                 onChange={(e) => setSelectedTeamId(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900"
+                className="w-full p-2.5 rounded-xl border border-slate-300 text-xs bg-white"
               >
-                <option value="">-- Choose Response Team --</option>
+                <option value="">-- Choose Unit --</option>
                 {responseTeams.map((team) => (
-                  <option key={team.id} value={team.id}>
-                    {team.name} ({team.agency} - {team.status})
+                  <option
+                    key={team.id}
+                    value={team.id}
+                    disabled={team.status === 'deployed' || team.status === 'on_site'}
+                  >
+                    {team.name} ({team.agency}) — {team.status === 'deployed' ? 'ALREADY DEPLOYED' : 'AVAILABLE'}
                   </option>
                 ))}
               </select>
-            </div>
 
-            <div className="flex gap-2 pt-2">
-              <button
-                onClick={handleAssignTeam}
-                disabled={!selectedTeamId}
-                className="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold disabled:opacity-50 transition"
-              >
-                Confirm Deployment
-              </button>
-              <button
-                onClick={() => setAssignModalIncident(null)}
-                className="py-2.5 px-4 bg-slate-100 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-200 transition"
-              >
-                Cancel
-              </button>
+              <div className="pt-3 flex justify-end gap-2">
+                <button
+                  onClick={() => setAssignModalIncident(null)}
+                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAssignTeam}
+                  disabled={!selectedTeamId}
+                  className="bg-[#1B4332] hover:bg-[#245740] disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-xl"
+                >
+                  Deploy Unit
+                </button>
+              </div>
             </div>
           </div>
         </div>

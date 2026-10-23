@@ -3,8 +3,10 @@ import {
   Incident,
   AssistanceRequest,
   Shelter,
+  AddShelterInput,
   ResponseTeam,
   ReliefResource,
+  ResourceAllocation,
   Volunteer,
   Vehicle,
   PropertyDamageReport,
@@ -12,6 +14,7 @@ import {
   OfficialAlert,
   WeatherData,
   UserProfile,
+  UserLocation,
   PortalType,
   AuthoritySection,
   CitizenAction,
@@ -31,7 +34,14 @@ import {
   INITIAL_DEMO_OFFICIAL_ALERTS,
 } from '../data/demoScenario';
 import { fetchLiveWeather, DEMO_WEATHER } from '../services/weatherService';
-import { supabase, isSupabaseConfigured, checkSupabaseConnection, SupabaseConnectionStatus } from '../services/supabaseClient';
+import {
+  supabase,
+  isSupabaseConfigured,
+  checkSupabaseConnection,
+  SupabaseConnectionStatus,
+  fetchUserProfile,
+} from '../services/supabaseClient';
+import { validateIndianMobile } from '../utils/phoneValidation';
 
 interface DisasterContextType {
   mode: 'live' | 'demo';
@@ -45,12 +55,19 @@ interface DisasterContextType {
   partnerSection: PartnerSection;
   setPartnerSection: (sec: PartnerSection) => void;
 
-  // Active User / Auth
+  // Location Management (Requirement 2)
+  userLocation: UserLocation;
+  requestDeviceLocation: () => Promise<void>;
+  setManualLocation: (lat: number, lng: number, district: string, address?: string) => void;
+
+  // Active User / Auth (Requirement 3)
   user: UserProfile | null;
   setUser: (user: UserProfile | null) => void;
   logout: () => void;
   isAuthModalOpen: boolean;
   setIsAuthModalOpen: (open: boolean) => void;
+  authModalInitialRole: 'citizen' | 'authority' | 'partner';
+  openAuthForRole: (role: 'citizen' | 'authority' | 'partner') => void;
   supabaseStatus: SupabaseConnectionStatus;
   refreshSupabaseStatus: () => Promise<void>;
 
@@ -60,6 +77,7 @@ interface DisasterContextType {
   responseTeams: ResponseTeam[];
   assistanceRequests: AssistanceRequest[];
   resources: ReliefResource[];
+  allocations: ResourceAllocation[];
   volunteers: Volunteer[];
   vehicles: Vehicle[];
   damageReports: PropertyDamageReport[];
@@ -81,22 +99,38 @@ interface DisasterContextType {
   resetScenario: () => void;
   submitEmergencyReport: (report: Omit<Incident, 'id' | 'reportedAt' | 'status'>) => Incident;
   verifyIncident: (id: string, newStatus: 'verified' | 'rejected', notes?: string) => void;
-  assignTeamToIncident: (incidentId: string, teamId: string) => void;
+  
+  // Requirement 7: Prevent repeat deployment of response teams
+  assignTeamToIncident: (incidentId: string, teamId: string) => { success: boolean; error?: string };
+  
   submitAssistanceRequest: (req: Omit<AssistanceRequest, 'id' | 'requestedAt' | 'status'>) => AssistanceRequest;
   fulfillAssistanceRequest: (requestId: string, partnerName: string, resourceId?: string) => void;
-  updateShelterOccupancy: (shelterId: string, newOccupancy: number) => void;
+  
+  // Requirement 9: Real Match Resources workflow
+  matchAndAllocateResource: (
+    requestId: string,
+    resourceId: string,
+    quantityToAllocate: number,
+    allocatedBy: string
+  ) => Promise<{ success: boolean; error?: string }>;
+
+  // Requirement 6: Add Shelter functionality with strict capacity validation
+  addShelter: (input: AddShelterInput) => { success: boolean; error?: string; shelter?: Shelter };
+  updateShelterOccupancy: (shelterId: string, newOccupancy: number) => { success: boolean; error?: string };
+
   registerResource: (res: Omit<ReliefResource, 'id' | 'registeredAt' | 'status'>) => ReliefResource;
   registerVolunteer: (vol: Omit<Volunteer, 'id' | 'registeredAt' | 'status'>) => Volunteer;
   registerVehicle: (veh: Omit<Vehicle, 'id' | 'status'>) => Vehicle;
   submitDamageReport: (dmg: Omit<PropertyDamageReport, 'id' | 'submittedAt' | 'status'>) => PropertyDamageReport;
   toggleChecklistItem: (id: string) => void;
-  markPotentialDuplicate: (incidentId: string, primaryId: string) => void;
 
-  // Modals
+  // Requirement 8: Fix Duplicate Review actions
+  linkDuplicateToPrimary: (duplicateId: string, primaryId: string, notes?: string) => { success: boolean; error?: string };
+  keepIncidentDistinct: (incidentId: string, notes?: string) => { success: boolean; error?: string };
+
+  // Emergency Call Modal
   isEmergencyCallModalOpen: boolean;
   setIsEmergencyCallModalOpen: (open: boolean) => void;
-  isAiAssistantOpen: boolean;
-  setIsAiAssistantOpen: (open: boolean) => void;
 }
 
 const DisasterContext = createContext<DisasterContextType | undefined>(undefined);
@@ -105,16 +139,32 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Mode: Live Data Mode is the default
   const [mode, setModeState] = useState<'live' | 'demo'>('live');
 
-  // Navigation
-  const [activePortal, setActivePortal] = useState<PortalType>('home');
+  // Navigation: Requirement 15 (Every top-level portal must open its Overview first)
+  const [activePortal, setActivePortalState] = useState<PortalType>('home');
   const [authoritySection, setAuthoritySection] = useState<AuthoritySection>('overview');
   const [citizenAction, setCitizenAction] = useState<CitizenAction>('main');
   const [partnerSection, setPartnerSection] = useState<PartnerSection>('main');
 
-  // Auth User - default to public demo user or restored session
+  // Location State (Requirement 2)
+  const [userLocation, setUserLocation] = useState<UserLocation>(() => {
+    try {
+      const saved = localStorage.getItem('resqsphere_user_location');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return {
+      lat: 16.9891,
+      lng: 81.784,
+      address: 'East Godavari Simulation Sector, AP',
+      district: 'East Godavari',
+      isDetected: false,
+      permissionStatus: 'prompt',
+    };
+  });
+
+  // Auth User - restored from session
   const [user, setUser] = useState<UserProfile | null>(() => {
     try {
-      const saved = localStorage.getItem('disastershield_user');
+      const saved = localStorage.getItem('resqsphere_user');
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
@@ -122,8 +172,8 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authModalInitialRole, setAuthModalInitialRole] = useState<'citizen' | 'authority' | 'partner'>('citizen');
   const [isEmergencyCallModalOpen, setIsEmergencyCallModalOpen] = useState(false);
-  const [isAiAssistantOpen, setIsAiAssistantOpen] = useState(false);
 
   // Supabase Status
   const [supabaseStatus, setSupabaseStatus] = useState<SupabaseConnectionStatus>({
@@ -131,8 +181,8 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     status: isSupabaseConfigured ? 'unverified' : 'not_configured',
     message: isSupabaseConfigured
       ? 'Client initialized · project access not yet verified'
-      : 'Authentication is not configured yet. Set the Supabase URL and anon key.',
-    url: 'https://xlihhtmqfbaymzddzjqp.supabase.co',
+      : 'Authentication is not configured yet. Set the Supabase URL and publishable key.',
+    url: 'https://pnykpvjsxwyezvvvjqjf.supabase.co',
   });
 
   // Demo state stores (Fully populated and interactive)
@@ -141,6 +191,20 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [demoTeams, setDemoTeams] = useState<ResponseTeam[]>(INITIAL_DEMO_TEAMS);
   const [demoRequests, setDemoRequests] = useState<AssistanceRequest[]>(INITIAL_DEMO_REQUESTS);
   const [demoResources, setDemoResources] = useState<ReliefResource[]>(INITIAL_DEMO_RESOURCES);
+  const [demoAllocations, setDemoAllocations] = useState<ResourceAllocation[]>([
+    {
+      id: 'ALC-DEMO-01',
+      requestId: 'REQ-2026-107',
+      resourceId: 'RES-01',
+      resourceName: 'Ready-to-Eat Hygienic Meal Packets',
+      category: 'food',
+      allocatedQuantity: 4,
+      unit: 'meal packets',
+      allocatedBy: 'Akshaya Relief Mission Trust',
+      allocatedAt: '2026-10-23T08:00:00Z',
+      isDemo: true,
+    },
+  ]);
   const [demoVolunteers, setDemoVolunteers] = useState<Volunteer[]>(INITIAL_DEMO_VOLUNTEERS);
   const [demoVehicles, setDemoVehicles] = useState<Vehicle[]>(INITIAL_DEMO_VEHICLES);
   const [demoDamageReports, setDemoDamageReports] = useState<PropertyDamageReport[]>(INITIAL_DEMO_DAMAGE_REPORTS);
@@ -152,10 +216,13 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [liveTeams, setLiveTeams] = useState<ResponseTeam[]>([]);
   const [liveRequests, setLiveRequests] = useState<AssistanceRequest[]>([]);
   const [liveResources, setLiveResources] = useState<ReliefResource[]>([]);
+  const [liveAllocations, setLiveAllocations] = useState<ResourceAllocation[]>([]);
   const [liveVolunteers, setLiveVolunteers] = useState<Volunteer[]>([]);
   const [liveVehicles, setLiveVehicles] = useState<Vehicle[]>([]);
   const [liveDamageReports, setLiveDamageReports] = useState<PropertyDamageReport[]>([]);
-  const [liveChecklist, setLiveChecklist] = useState<ChecklistItem[]>(INITIAL_DEMO_CHECKLIST.map((c) => ({ ...c, completed: false })));
+  const [liveChecklist, setLiveChecklist] = useState<ChecklistItem[]>(
+    INITIAL_DEMO_CHECKLIST.map((c) => ({ ...c, completed: false }))
+  );
 
   // Weather state
   const [weather, setWeather] = useState<WeatherData>(DEMO_WEATHER);
@@ -165,9 +232,59 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Official Alerts
   const [officialAlerts, setOfficialAlerts] = useState<OfficialAlert[]>(INITIAL_DEMO_OFFICIAL_ALERTS);
 
-  // Initialize and check connection
+  // Top-Level Portal Navigation Handler (Requirement 15)
+  const setActivePortal = (portal: PortalType) => {
+    setActivePortalState(portal);
+    // Always open that portal's Overview dashboard first
+    if (portal === 'citizen') {
+      setCitizenAction('main');
+    } else if (portal === 'authority') {
+      setAuthoritySection('overview');
+    } else if (portal === 'partner') {
+      setPartnerSection('main');
+    }
+  };
+
+  // Dedicated role modal opener (Requirement 3)
+  const openAuthForRole = (role: 'citizen' | 'authority' | 'partner') => {
+    setAuthModalInitialRole(role);
+    setIsAuthModalOpen(true);
+  };
+
+  // Restore authenticated session from Supabase on mount
   useEffect(() => {
     refreshSupabaseStatus();
+
+    if (supabase && isSupabaseConfigured) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) {
+          fetchUserProfile(session.user.id).then((profile) => {
+            if (profile) {
+              setUser(profile);
+              localStorage.setItem('resqsphere_user', JSON.stringify(profile));
+            }
+          });
+        }
+      });
+
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (session?.user) {
+          fetchUserProfile(session.user.id).then((profile) => {
+            if (profile) {
+              setUser(profile);
+              localStorage.setItem('resqsphere_user', JSON.stringify(profile));
+            }
+          });
+        } else {
+          setUser(null);
+          localStorage.removeItem('resqsphere_user');
+        }
+      });
+
+      return () => {
+        subscription.unsubscribe();
+      };
+    }
   }, []);
 
   const refreshSupabaseStatus = async () => {
@@ -175,7 +292,101 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setSupabaseStatus(res);
   };
 
-  // Weather fetcher based on active mode
+  // Device Geolocation Request (Requirement 2)
+  const requestDeviceLocation = async () => {
+    if (!navigator.geolocation) {
+      setUserLocation((prev) => ({
+        ...prev,
+        permissionStatus: 'unavailable',
+      }));
+      return;
+    }
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const lat = Number(pos.coords.latitude.toFixed(4));
+            const lng = Number(pos.coords.longitude.toFixed(4));
+            const detectedArea = `Detected Coordinates (${lat}°N, ${lng}°E)`;
+
+            const updatedLoc: UserLocation = {
+              lat,
+              lng,
+              address: detectedArea,
+              district: 'Current Local Zone',
+              isDetected: true,
+              permissionStatus: 'granted',
+            };
+
+            setUserLocation(updatedLoc);
+            try {
+              localStorage.setItem('resqsphere_user_location', JSON.stringify(updatedLoc));
+            } catch {}
+
+            // Immediately load weather for detected coordinates
+            if (mode === 'live') {
+              setIsWeatherLoading(true);
+              fetchLiveWeather(lat, lng, detectedArea)
+                .then((data) => {
+                  setWeather(data);
+                  setIsWeatherLoading(false);
+                })
+                .catch(() => {
+                  setIsWeatherLoading(false);
+                });
+            }
+            resolve();
+          },
+          (err) => {
+            console.warn('Geolocation denied or timed out:', err.message);
+            const updatedLoc: UserLocation = {
+              ...userLocation,
+              isDetected: false,
+              permissionStatus: err.code === 1 ? 'denied' : 'unavailable',
+            };
+            setUserLocation(updatedLoc);
+            try {
+              localStorage.setItem('resqsphere_user_location', JSON.stringify(updatedLoc));
+            } catch {}
+            reject(err);
+          },
+          { timeout: 10000, enableHighAccuracy: true }
+        );
+      });
+    } catch {
+      // Gracefully handled; user can select manual location
+    }
+  };
+
+  const setManualLocation = (lat: number, lng: number, district: string, address?: string) => {
+    const loc: UserLocation = {
+      lat,
+      lng,
+      district,
+      address: address || `${district} Zone`,
+      isDetected: false,
+      permissionStatus: 'granted',
+    };
+    setUserLocation(loc);
+    try {
+      localStorage.setItem('resqsphere_user_location', JSON.stringify(loc));
+    } catch {}
+
+    if (mode === 'live') {
+      setIsWeatherLoading(true);
+      fetchLiveWeather(lat, lng, loc.address || district)
+        .then((data) => {
+          setWeather(data);
+          setIsWeatherLoading(false);
+        })
+        .catch(() => {
+          setIsWeatherLoading(false);
+        });
+    }
+  };
+
+  // Weather fetcher based on active mode & userLocation
   useEffect(() => {
     if (mode === 'demo') {
       setWeather(DEMO_WEATHER);
@@ -185,12 +396,16 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return;
     }
 
-    // Live mode: fetch real Open-Meteo weather
+    // Live mode: fetch real Open-Meteo weather for current user location
     let isMounted = true;
     setIsWeatherLoading(true);
     setWeatherError(null);
 
-    fetchLiveWeather(16.9891, 81.784, 'Rajahmundry / Godavari Basin')
+    const targetLat = userLocation.lat || 16.9891;
+    const targetLng = userLocation.lng || 81.784;
+    const targetName = userLocation.address || userLocation.district || 'Local Station';
+
+    fetchLiveWeather(targetLat, targetLng, targetName)
       .then((data) => {
         if (isMounted) {
           setWeather(data);
@@ -205,14 +420,13 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
       });
 
-    // In live mode, official alerts must not be made up
-    // Set to empty or configured official notices
+    // In live mode, alerts must not be fabricated
     setOfficialAlerts([]);
 
     return () => {
       isMounted = false;
     };
-  }, [mode]);
+  }, [mode, userLocation.lat, userLocation.lng]);
 
   const setMode = (newMode: 'live' | 'demo') => {
     setModeState(newMode);
@@ -220,7 +434,7 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const logout = () => {
     setUser(null);
-    localStorage.removeItem('disastershield_user');
+    localStorage.removeItem('resqsphere_user');
     if (supabase) {
       supabase.auth.signOut().catch(() => {});
     }
@@ -232,6 +446,7 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const responseTeams = mode === 'demo' ? demoTeams : liveTeams;
   const assistanceRequests = mode === 'demo' ? demoRequests : liveRequests;
   const resources = mode === 'demo' ? demoResources : liveResources;
+  const allocations = mode === 'demo' ? demoAllocations : liveAllocations;
   const volunteers = mode === 'demo' ? demoVolunteers : liveVolunteers;
   const vehicles = mode === 'demo' ? demoVehicles : liveVehicles;
   const damageReports = mode === 'demo' ? demoDamageReports : liveDamageReports;
@@ -239,19 +454,12 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Four Primary Statistics (Calculated dynamically)
   const stats = useMemo(() => {
-    // 1. Total Incidents
     const totalIncidents = incidents.filter((i) => i.status !== 'rejected').length;
-
-    // 2. Active Response Teams (deployed or on_site)
     const activeResponseTeams = responseTeams.filter(
       (t) => t.status === 'deployed' || t.status === 'on_site'
     ).length;
-
-    // 3. People in Shelters (sum of currentOccupancy)
     const peopleInShelters = shelters.reduce((acc, s) => acc + (s.currentOccupancy || 0), 0);
-
-    // 4. Pending Assistance (status === 'pending')
-    const pendingAssistance = assistanceRequests.filter((r) => r.status === 'pending').length;
+    const pendingAssistance = assistanceRequests.filter((r) => r.status === 'pending' || r.status === 'partially_fulfilled').length;
 
     return {
       totalIncidents,
@@ -318,41 +526,59 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } else {
       setLiveIncidents(updater);
       if (supabase && isSupabaseConfigured) {
-        Promise.resolve(supabase.from('incidents').update({ status: newStatus, verification_notes: notes }).eq('id', id)).catch(() => {});
+        Promise.resolve(
+          supabase.from('incidents').update({ status: newStatus, verification_notes: notes }).eq('id', id)
+        ).catch(() => {});
       }
     }
   };
 
-  const assignTeamToIncident = (incidentId: string, teamId: string) => {
-    let assignedTeamName = '';
+  // Requirement 7: Prevent repeat deployment of response teams
+  const assignTeamToIncident = (incidentId: string, teamId: string): { success: boolean; error?: string } => {
+    const currentTeams = mode === 'demo' ? demoTeams : liveTeams;
+    const targetTeam = currentTeams.find((t) => t.id === teamId);
 
-    // Update Team Status to 'deployed'
+    if (!targetTeam) {
+      return { success: false, error: 'Selected response team was not found.' };
+    }
+
+    // Underlying enforcement: reject if already deployed or on site
+    if (targetTeam.status === 'deployed' || targetTeam.status === 'on_site') {
+      return {
+        success: false,
+        error: `Cannot deploy ${targetTeam.name}: Unit is already active and deployed to incident "${targetTeam.currentIncidentTitle || targetTeam.currentIncidentId}".`,
+      };
+    }
+
+    const currentIncidents = mode === 'demo' ? demoIncidents : liveIncidents;
+    const targetIncident = currentIncidents.find((i) => i.id === incidentId);
+    const incidentTitle = targetIncident?.title || incidentId;
+
+    // 1. Update team status
     const teamUpdater = (prev: ResponseTeam[]) =>
-      prev.map((team) => {
-        if (team.id === teamId) {
-          assignedTeamName = team.name;
-          return {
-            ...team,
-            status: 'deployed' as const,
-            currentIncidentId: incidentId,
-          };
-        }
-        return team;
-      });
+      prev.map((team) =>
+        team.id === teamId
+          ? {
+              ...team,
+              status: 'deployed' as const,
+              currentIncidentId: incidentId,
+              currentIncidentTitle: incidentTitle,
+            }
+          : team
+      );
 
-    // Update Incident Status to 'dispatched'
+    // 2. Update incident status
     const incidentUpdater = (prev: Incident[]) =>
-      prev.map((inc) => {
-        if (inc.id === incidentId) {
-          return {
-            ...inc,
-            status: 'dispatched' as IncidentStatus,
-            assignedTeamId: teamId,
-            assignedTeamName: assignedTeamName || inc.assignedTeamName,
-          };
-        }
-        return inc;
-      });
+      prev.map((inc) =>
+        inc.id === incidentId
+          ? {
+              ...inc,
+              status: 'dispatched' as IncidentStatus,
+              assignedTeamId: teamId,
+              assignedTeamName: targetTeam.name,
+            }
+          : inc
+      );
 
     if (mode === 'demo') {
       setDemoTeams(teamUpdater);
@@ -360,16 +586,37 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } else {
       setLiveTeams(teamUpdater);
       setLiveIncidents(incidentUpdater);
+      if (supabase && isSupabaseConfigured) {
+        Promise.resolve(
+          supabase
+            .from('response_teams')
+            .update({ status: 'deployed', current_incident_id: incidentId, current_incident_title: incidentTitle })
+            .eq('id', teamId)
+        ).catch(() => {});
+        Promise.resolve(
+          supabase
+            .from('incidents')
+            .update({ status: 'dispatched', assigned_team_id: teamId, assigned_team_name: targetTeam.name })
+            .eq('id', incidentId)
+        ).catch(() => {});
+      }
     }
+
+    return { success: true };
   };
 
   const submitAssistanceRequest = (
     req: Omit<AssistanceRequest, 'id' | 'requestedAt' | 'status'>
   ): AssistanceRequest => {
     const id = `REQ-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
+    const qty = req.quantityRequested || req.peopleCount || 1;
     const newReq: AssistanceRequest = {
       ...req,
       id,
+      quantityRequested: qty,
+      quantityFulfilled: 0,
+      remainingQuantity: qty,
+      unit: req.unit || 'units',
       requestedAt: new Date().toISOString(),
       status: 'pending',
       isDemo: mode === 'demo',
@@ -387,8 +634,181 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return newReq;
   };
 
+  // Requirement 9: Real Match Resources workflow with atomic inventory decrement
+  const matchAndAllocateResource = async (
+    requestId: string,
+    resourceId: string,
+    quantityToAllocate: number,
+    allocatedBy: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    // 1. Validation
+    if (!Number.isInteger(quantityToAllocate) || quantityToAllocate <= 0) {
+      return { success: false, error: 'Allocation quantity must be a positive whole number.' };
+    }
+
+    const currentRequests = mode === 'demo' ? demoRequests : liveRequests;
+    const currentResources = mode === 'demo' ? demoResources : liveResources;
+
+    const targetReq = currentRequests.find((r) => r.id === requestId);
+    if (!targetReq) {
+      return { success: false, error: 'Assistance request was not found.' };
+    }
+
+    const targetRes = currentResources.find((r) => r.id === resourceId);
+    if (!targetRes) {
+      return { success: false, error: 'Selected relief resource was not found.' };
+    }
+
+    const remainingNeeded = targetReq.remainingQuantity ?? targetReq.quantityRequested ?? targetReq.peopleCount;
+    if (quantityToAllocate > remainingNeeded) {
+      return {
+        success: false,
+        error: `Cannot allocate ${quantityToAllocate} ${targetRes.unit}. Requested remaining need is only ${remainingNeeded} ${targetReq.unit || 'units'}.`,
+      };
+    }
+
+    if (quantityToAllocate > targetRes.quantity) {
+      return {
+        success: false,
+        error: `Insufficient inventory: only ${targetRes.quantity} ${targetRes.unit} available in stock.`,
+      };
+    }
+
+    // 2. Perform allocation
+    const allocId = `ALC-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const newAllocation: ResourceAllocation = {
+      id: allocId,
+      requestId,
+      resourceId,
+      resourceName: targetRes.itemName,
+      category: targetRes.category,
+      allocatedQuantity: quantityToAllocate,
+      unit: targetRes.unit,
+      allocatedBy,
+      allocatedAt: new Date().toISOString(),
+      isDemo: mode === 'demo',
+    };
+
+    // New request metrics
+    const newFulfilled = (targetReq.quantityFulfilled || 0) + quantityToAllocate;
+    const totalRequired = targetReq.quantityRequested || remainingNeeded;
+    const newRemaining = Math.max(0, totalRequired - newFulfilled);
+    const newStatus = newRemaining === 0 ? ('fulfilled' as const) : ('partially_fulfilled' as const);
+
+    // New resource metric
+    const newResQty = targetRes.quantity - quantityToAllocate;
+    const newResStatus = newResQty === 0 ? ('allocated' as const) : targetRes.status;
+
+    if (mode === 'demo') {
+      // Demo Mode Isolated Atomic Update
+      setDemoRequests((prev) =>
+        prev.map((r) =>
+          r.id === requestId
+            ? {
+                ...r,
+                quantityFulfilled: newFulfilled,
+                remainingQuantity: newRemaining,
+                status: newStatus,
+                fulfilledBy: allocatedBy,
+                fulfilledAt: new Date().toISOString(),
+                allocatedResourceId: resourceId,
+              }
+            : r
+        )
+      );
+
+      setDemoResources((prev) =>
+        prev.map((res) =>
+          res.id === resourceId
+            ? {
+                ...res,
+                quantity: newResQty,
+                status: newResStatus,
+              }
+            : res
+        )
+      );
+
+      setDemoAllocations((prev) => [newAllocation, ...prev]);
+      return { success: true };
+    } else {
+      // Live Mode: Supabase atomic update / RPC call
+      if (supabase && isSupabaseConfigured) {
+        try {
+          const { data, error } = await supabase.rpc('allocate_relief_resource', {
+            p_request_id: requestId,
+            p_resource_id: resourceId,
+            p_quantity: quantityToAllocate,
+            p_allocated_by: allocatedBy,
+          });
+
+          if (error) {
+            return { success: false, error: error.message };
+          }
+          if (data && !data.success) {
+            return { success: false, error: data.error };
+          }
+        } catch (rpcErr: any) {
+          console.warn('RPC failed, falling back to sequential transaction:', rpcErr);
+          // Fallback update
+          await supabase.from('relief_resources').update({ quantity: newResQty }).eq('id', resourceId);
+          await supabase
+            .from('assistance_requests')
+            .update({
+              quantity_fulfilled: newFulfilled,
+              remaining_quantity: newRemaining,
+              status: newStatus,
+              fulfilled_by: allocatedBy,
+              fulfilled_at: new Date().toISOString(),
+            })
+            .eq('id', requestId);
+          await supabase.from('allocations').insert([
+            {
+              id: allocId,
+              request_id: requestId,
+              resource_id: resourceId,
+              allocated_quantity: quantityToAllocate,
+              unit: targetRes.unit,
+              allocated_by: allocatedBy,
+            },
+          ]);
+        }
+      }
+
+      setLiveRequests((prev) =>
+        prev.map((r) =>
+          r.id === requestId
+            ? {
+                ...r,
+                quantityFulfilled: newFulfilled,
+                remainingQuantity: newRemaining,
+                status: newStatus,
+                fulfilledBy: allocatedBy,
+                fulfilledAt: new Date().toISOString(),
+                allocatedResourceId: resourceId,
+              }
+            : r
+        )
+      );
+
+      setLiveResources((prev) =>
+        prev.map((res) =>
+          res.id === resourceId
+            ? {
+                ...res,
+                quantity: newResQty,
+                status: newResStatus,
+              }
+            : res
+        )
+      );
+
+      setLiveAllocations((prev) => [newAllocation, ...prev]);
+      return { success: true };
+    }
+  };
+
   const fulfillAssistanceRequest = (requestId: string, partnerName: string, resourceId?: string) => {
-    // 1. Update Request
     const requestUpdater = (prev: AssistanceRequest[]) =>
       prev.map((req) =>
         req.id === requestId
@@ -398,19 +818,20 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               fulfilledBy: partnerName,
               fulfilledAt: new Date().toISOString(),
               allocatedResourceId: resourceId,
+              quantityFulfilled: req.quantityRequested || 1,
+              remainingQuantity: 0,
             }
           : req
       );
 
-    // 2. Decrement Resource quantity if matched
     const resourceUpdater = (prev: ReliefResource[]) =>
       prev.map((res) => {
         if (resourceId && res.id === resourceId) {
-          const newQty = Math.max(0, res.quantity - 10);
+          const newQty = Math.max(0, res.quantity - 1);
           return {
             ...res,
             quantity: newQty,
-            status: newQty === 0 ? ('allocated' as const) : res.status,
+            status: newQty === 0 ? ('allocated' as const) : ('available' as const),
           };
         }
         return res;
@@ -418,39 +839,255 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     if (mode === 'demo') {
       setDemoRequests(requestUpdater);
-      if (resourceId) setDemoResources(resourceUpdater);
+      setDemoResources(resourceUpdater);
     } else {
       setLiveRequests(requestUpdater);
-      if (resourceId) setLiveResources(resourceUpdater);
+      setLiveResources(resourceUpdater);
+      if (supabase && isSupabaseConfigured) {
+        Promise.resolve(
+          supabase
+            .from('assistance_requests')
+            .update({
+              status: 'fulfilled',
+              fulfilled_by: partnerName,
+              fulfilled_at: new Date().toISOString(),
+              remaining_quantity: 0,
+            })
+            .eq('id', requestId)
+        ).catch(() => {});
+      }
     }
   };
 
-  const updateShelterOccupancy = (shelterId: string, newOccupancy: number) => {
-    const updater = (prev: Shelter[]) =>
-      prev.map((s) => {
-        if (s.id === shelterId) {
-          const occ = Math.max(0, newOccupancy);
-          let status = s.status;
-          if (occ >= s.capacity) status = 'full';
-          else if (occ >= s.capacity * 0.85) status = 'near_capacity';
-          else status = 'active';
+  // Requirement 6: Add Shelter functionality with strict capacity validation
+  const addShelter = (input: AddShelterInput): { success: boolean; error?: string; shelter?: Shelter } => {
+    // 1. Validation
+    if (!input.name || input.name.trim().length === 0) {
+      return { success: false, error: 'Shelter name is required.' };
+    }
 
-          return { ...s, currentOccupancy: occ, status };
-        }
-        return s;
-      });
+    if (!Number.isInteger(input.capacity) || input.capacity <= 0) {
+      return { success: false, error: 'Maximum capacity must be a positive whole number greater than 0.' };
+    }
+
+    if (!Number.isInteger(input.currentOccupancy) || input.currentOccupancy < 0) {
+      return { success: false, error: 'Current occupancy must be a non-negative whole number (0 or greater).' };
+    }
+
+    // Critical Requirement: Current occupancy must never exceed maximum capacity
+    if (input.currentOccupancy > input.capacity) {
+      return {
+        success: false,
+        error: `Occupancy (${input.currentOccupancy}) exceeds maximum capacity (${input.capacity}). Occupancy can never exceed shelter capacity.`,
+      };
+    }
+
+    // Phone validation
+    const phoneVal = validateIndianMobile(input.contactPhone);
+    if (!phoneVal.isValid) {
+      return { success: false, error: phoneVal.error || 'Enter a valid 10-digit Indian mobile number for shelter contact.' };
+    }
+
+    // Determine status
+    let status = input.status || 'active';
+    if (input.currentOccupancy >= input.capacity) {
+      status = 'full';
+    } else if (input.currentOccupancy >= input.capacity * 0.85) {
+      status = 'near_capacity';
+    }
+
+    const id = `SHL-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
+    const newShelter: Shelter = {
+      id,
+      name: input.name.trim(),
+      address: input.address.trim(),
+      district: input.district || 'East Godavari Simulation Sector',
+      lat: input.lat || 16.989,
+      lng: input.lng || 81.784,
+      capacity: input.capacity,
+      currentOccupancy: input.currentOccupancy,
+      status,
+      facilities: input.facilities || ['Safe Drinking Water', 'Emergency Power', 'Restrooms'],
+      contactPhone: phoneVal.normalized,
+      contactPerson: input.contactPerson || 'Camp Administrator',
+      isDemo: mode === 'demo',
+    };
+
+    if (mode === 'demo') {
+      setDemoShelters((prev) => [newShelter, ...prev]);
+    } else {
+      setLiveShelters((prev) => [newShelter, ...prev]);
+      if (supabase && isSupabaseConfigured) {
+        Promise.resolve(
+          supabase.from('shelters').insert([
+            {
+              id: newShelter.id,
+              name: newShelter.name,
+              address: newShelter.address,
+              district: newShelter.district,
+              lat: newShelter.lat,
+              lng: newShelter.lng,
+              capacity: newShelter.capacity,
+              current_occupancy: newShelter.currentOccupancy,
+              status: newShelter.status,
+              facilities: newShelter.facilities,
+              contact_phone: newShelter.contactPhone,
+              contact_person: newShelter.contactPerson,
+            },
+          ])
+        ).catch((err: any) => {
+          console.warn('Failed to insert shelter in Supabase:', err);
+        });
+      }
+    }
+
+    return { success: true, shelter: newShelter };
+  };
+
+  const updateShelterOccupancy = (
+    shelterId: string,
+    newOccupancy: number
+  ): { success: boolean; error?: string } => {
+    if (!Number.isInteger(newOccupancy) || newOccupancy < 0) {
+      return { success: false, error: 'Occupancy must be a non-negative whole number.' };
+    }
+
+    const currentShelters = mode === 'demo' ? demoShelters : liveShelters;
+    const targetShelter = currentShelters.find((s) => s.id === shelterId);
+    if (!targetShelter) {
+      return { success: false, error: 'Shelter not found.' };
+    }
+
+    // Critical Requirement: Occupancy must never exceed capacity
+    if (newOccupancy > targetShelter.capacity) {
+      return {
+        success: false,
+        error: `Cannot set occupancy to ${newOccupancy}: Shelter maximum capacity is ${targetShelter.capacity}.`,
+      };
+    }
+
+    let status = targetShelter.status;
+    if (newOccupancy >= targetShelter.capacity) status = 'full';
+    else if (newOccupancy >= targetShelter.capacity * 0.85) status = 'near_capacity';
+    else status = 'active';
+
+    const updater = (prev: Shelter[]) =>
+      prev.map((s) => (s.id === shelterId ? { ...s, currentOccupancy: newOccupancy, status } : s));
 
     if (mode === 'demo') {
       setDemoShelters(updater);
     } else {
       setLiveShelters(updater);
       if (supabase && isSupabaseConfigured) {
-        Promise.resolve(supabase.from('shelters').update({ current_occupancy: newOccupancy }).eq('id', shelterId)).catch(() => {});
+        Promise.resolve(
+          supabase
+            .from('shelters')
+            .update({ current_occupancy: newOccupancy, status })
+            .eq('id', shelterId)
+        ).catch(() => {});
       }
     }
+
+    return { success: true };
   };
 
-  const registerResource = (res: Omit<ReliefResource, 'id' | 'registeredAt' | 'status'>): ReliefResource => {
+  // Requirement 8: Fix Duplicate Review actions
+  const linkDuplicateToPrimary = (
+    duplicateId: string,
+    primaryId: string,
+    notes?: string
+  ): { success: boolean; error?: string } => {
+    if (duplicateId === primaryId) {
+      return { success: false, error: 'Cannot link an incident to itself as a duplicate.' };
+    }
+
+    const currentIncidents = mode === 'demo' ? demoIncidents : liveIncidents;
+    const primaryIncident = currentIncidents.find((i) => i.id === primaryId);
+    if (!primaryIncident) {
+      return { success: false, error: 'Selected primary incident was not found.' };
+    }
+
+    // Prevent circular linkage
+    if (primaryIncident.isDuplicateOf === duplicateId) {
+      return { success: false, error: 'Circular duplicate link detected. Primary incident is already linked to this report.' };
+    }
+
+    const updater = (prev: Incident[]) =>
+      prev.map((inc) =>
+        inc.id === duplicateId
+          ? {
+              ...inc,
+              isDuplicateOf: primaryId,
+              isPotentialDuplicate: true,
+              duplicateReviewed: true,
+              status: 'duplicate' as IncidentStatus,
+              verificationNotes: notes || `Linked as duplicate of ${primaryId} (${primaryIncident.title})`,
+            }
+          : inc
+      );
+
+    if (mode === 'demo') {
+      setDemoIncidents(updater);
+    } else {
+      setLiveIncidents(updater);
+      if (supabase && isSupabaseConfigured) {
+        Promise.resolve(
+          supabase
+            .from('incidents')
+            .update({
+              is_duplicate_of: primaryId,
+              is_potential_duplicate: true,
+              duplicate_reviewed: true,
+              status: 'duplicate',
+              verification_notes: notes || `Linked as duplicate of ${primaryId}`,
+            })
+            .eq('id', duplicateId)
+        ).catch(() => {});
+      }
+    }
+
+    return { success: true };
+  };
+
+  const keepIncidentDistinct = (incidentId: string, notes?: string): { success: boolean; error?: string } => {
+    const updater = (prev: Incident[]) =>
+      prev.map((inc) =>
+        inc.id === incidentId
+          ? {
+              ...inc,
+              isPotentialDuplicate: false,
+              isDuplicateOf: undefined,
+              duplicateReviewed: true,
+              verificationNotes: notes || 'Reviewed by Authority: Verified as distinct emergency incident.',
+            }
+          : inc
+      );
+
+    if (mode === 'demo') {
+      setDemoIncidents(updater);
+    } else {
+      setLiveIncidents(updater);
+      if (supabase && isSupabaseConfigured) {
+        Promise.resolve(
+          supabase
+            .from('incidents')
+            .update({
+              is_potential_duplicate: false,
+              is_duplicate_of: null,
+              duplicate_reviewed: true,
+              verification_notes: notes || 'Reviewed by Authority: Verified as distinct emergency incident.',
+            })
+            .eq('id', incidentId)
+        ).catch(() => {});
+      }
+    }
+
+    return { success: true };
+  };
+
+  const registerResource = (
+    res: Omit<ReliefResource, 'id' | 'registeredAt' | 'status'>
+  ): ReliefResource => {
     const id = `RES-${Math.floor(10 + Math.random() * 90)}`;
     const newRes: ReliefResource = {
       ...res,
@@ -464,12 +1101,35 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setDemoResources((prev) => [newRes, ...prev]);
     } else {
       setLiveResources((prev) => [newRes, ...prev]);
+      if (supabase && isSupabaseConfigured) {
+        Promise.resolve(
+          supabase.from('relief_resources').insert([
+            {
+              id: newRes.id,
+              partner_name: newRes.partnerName,
+              partner_id: newRes.partnerId,
+              category: newRes.category,
+              item_name: newRes.itemName,
+              quantity: newRes.quantity,
+              unit: newRes.unit,
+              location: newRes.location,
+              district: newRes.district,
+              lat: newRes.lat,
+              lng: newRes.lng,
+              status: newRes.status,
+              contact_phone: newRes.contactPhone,
+            },
+          ])
+        ).catch(() => {});
+      }
     }
 
     return newRes;
   };
 
-  const registerVolunteer = (vol: Omit<Volunteer, 'id' | 'registeredAt' | 'status'>): Volunteer => {
+  const registerVolunteer = (
+    vol: Omit<Volunteer, 'id' | 'registeredAt' | 'status'>
+  ): Volunteer => {
     const id = `VOL-${Math.floor(10 + Math.random() * 90)}`;
     const newVol: Volunteer = {
       ...vol,
@@ -483,6 +1143,23 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setDemoVolunteers((prev) => [newVol, ...prev]);
     } else {
       setLiveVolunteers((prev) => [newVol, ...prev]);
+      if (supabase && isSupabaseConfigured) {
+        Promise.resolve(
+          supabase.from('volunteers').insert([
+            {
+              id: newVol.id,
+              name: newVol.name,
+              phone: newVol.phone,
+              email: newVol.email,
+              district: newVol.district,
+              skills: newVol.skills,
+              preferred_work: newVol.preferredWork,
+              available_hours: newVol.availableHours,
+              status: newVol.status,
+            },
+          ])
+        ).catch(() => {});
+      }
     }
 
     return newVol;
@@ -501,12 +1178,33 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setDemoVehicles((prev) => [newVeh, ...prev]);
     } else {
       setLiveVehicles((prev) => [newVeh, ...prev]);
+      if (supabase && isSupabaseConfigured) {
+        Promise.resolve(
+          supabase.from('vehicles').insert([
+            {
+              id: newVeh.id,
+              partner_name: newVeh.partnerName,
+              vehicle_type: newVeh.vehicleType,
+              registration_number: newVeh.registrationNumber,
+              capacity: newVeh.capacity,
+              driver_name: newVeh.driverName,
+              driver_phone: newVeh.driverPhone,
+              location: newVeh.location,
+              status: newVeh.status,
+              lat: newVeh.lat,
+              lng: newVeh.lng,
+            },
+          ])
+        ).catch(() => {});
+      }
     }
 
     return newVeh;
   };
 
-  const submitDamageReport = (dmg: Omit<PropertyDamageReport, 'id' | 'submittedAt' | 'status'>): PropertyDamageReport => {
+  const submitDamageReport = (
+    dmg: Omit<PropertyDamageReport, 'id' | 'submittedAt' | 'status'>
+  ): PropertyDamageReport => {
     const id = `DAM-${new Date().getFullYear()}-${Math.floor(10 + Math.random() * 90)}`;
     const newDmg: PropertyDamageReport = {
       ...dmg,
@@ -536,26 +1234,6 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const markPotentialDuplicate = (incidentId: string, primaryId: string) => {
-    const updater = (prev: Incident[]) =>
-      prev.map((inc) =>
-        inc.id === incidentId
-          ? {
-              ...inc,
-              isDuplicateOf: primaryId,
-              isPotentialDuplicate: true,
-              verificationNotes: `Linked as potential duplicate of ${primaryId}`,
-            }
-          : inc
-      );
-
-    if (mode === 'demo') {
-      setDemoIncidents(updater);
-    } else {
-      setLiveIncidents(updater);
-    }
-  };
-
   return (
     <DisasterContext.Provider
       value={{
@@ -569,11 +1247,16 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setCitizenAction,
         partnerSection,
         setPartnerSection,
+        userLocation,
+        requestDeviceLocation,
+        setManualLocation,
         user,
         setUser,
         logout,
         isAuthModalOpen,
         setIsAuthModalOpen,
+        authModalInitialRole,
+        openAuthForRole,
         supabaseStatus,
         refreshSupabaseStatus,
         incidents,
@@ -581,6 +1264,7 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         responseTeams,
         assistanceRequests,
         resources,
+        allocations,
         volunteers,
         vehicles,
         damageReports,
@@ -596,17 +1280,18 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         assignTeamToIncident,
         submitAssistanceRequest,
         fulfillAssistanceRequest,
+        matchAndAllocateResource,
+        addShelter,
         updateShelterOccupancy,
         registerResource,
         registerVolunteer,
         registerVehicle,
         submitDamageReport,
         toggleChecklistItem,
-        markPotentialDuplicate,
+        linkDuplicateToPrimary,
+        keepIncidentDistinct,
         isEmergencyCallModalOpen,
         setIsEmergencyCallModalOpen,
-        isAiAssistantOpen,
-        setIsAiAssistantOpen,
       }}
     >
       {children}

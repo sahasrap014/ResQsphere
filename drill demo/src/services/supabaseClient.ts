@@ -1,13 +1,21 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { UserProfile } from '../types/disaster';
 
-// Default project URL provided by owner
+// Project URL provided by owner for ResQsphere
 export const SUPABASE_URL: string =
-  (import.meta.env.VITE_SUPABASE_URL as string) || 'https://xlihhtmqfbaymzddzjqp.supabase.co';
+  (import.meta.env.VITE_SUPABASE_URL as string) ||
+  (import.meta.env.NEXT_PUBLIC_SUPABASE_URL as string) ||
+  'https://pnykpvjsxwyezvvvjqjf.supabase.co';
 
 export const SUPABASE_ANON_KEY: string =
-  (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || '';
+  (import.meta.env.VITE_SUPABASE_ANON_KEY as string) ||
+  (import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY as string) ||
+  (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string) ||
+  '';
 
-export const isSupabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY && SUPABASE_ANON_KEY.length > 10);
+export const isSupabaseConfigured = Boolean(
+  SUPABASE_URL && SUPABASE_ANON_KEY && SUPABASE_ANON_KEY.length > 10
+);
 
 let supabaseInstance: SupabaseClient | null = null;
 
@@ -17,6 +25,7 @@ if (isSupabaseConfigured) {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
+        storageKey: 'resqsphere_auth_token',
       },
     });
   } catch (err) {
@@ -39,16 +48,15 @@ export async function checkSupabaseConnection(): Promise<SupabaseConnectionStatu
     return {
       isConfigured: false,
       status: 'not_configured',
-      message: 'Authentication is not configured yet. Set the Supabase URL and anon key in environment (VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY).',
+      message: 'Authentication is not configured yet. Set the Supabase URL and publishable key in environment (VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY).',
       url: SUPABASE_URL,
     };
   }
 
   try {
     // Attempt a lightweight test call to verify connection
-    const { data: _data, error } = await supabase.from('incidents').select('id').limit(1);
+    const { error } = await supabase.from('incidents').select('id').limit(1);
     if (error && error.code !== 'PGRST116') {
-      // If table doesn't exist yet, client is initialized but tables need setup
       return {
         isConfigured: true,
         status: 'unverified',
@@ -69,5 +77,33 @@ export async function checkSupabaseConnection(): Promise<SupabaseConnectionStatu
       message: `Connection test failed: ${err?.message || 'Network unreachable'}`,
       url: SUPABASE_URL,
     };
+  }
+}
+
+/**
+ * Fetch authenticated user profile and verify active role
+ */
+export async function fetchUserProfile(userId: string): Promise<UserProfile | null> {
+  if (!supabase || !isSupabaseConfigured) return null;
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (error || !data) return null;
+    return {
+      id: data.id,
+      email: data.email,
+      fullName: data.full_name,
+      role: data.role,
+      phone: data.phone,
+      district: data.district,
+      agency: data.agency,
+      isApproved: data.is_approved,
+    };
+  } catch {
+    return null;
   }
 }

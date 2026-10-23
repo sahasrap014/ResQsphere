@@ -6,7 +6,6 @@ import { CitizenPortal } from './pages/CitizenPortal';
 import { AuthorityPortal } from './pages/AuthorityPortal';
 import { ReliefPartnerPortal } from './pages/ReliefPartnerPortal';
 import { EmergencyCallModal } from './components/common/EmergencyCallModal';
-import { AIAssistantModal } from './components/common/AIAssistantModal';
 import { AuthModal } from './pages/AuthModal';
 import { ShieldCheck, PhoneCall, HeartHandshake, Info } from 'lucide-react';
 
@@ -28,7 +27,6 @@ const MainApp: React.FC = () => {
 
       {/* Common Modals */}
       <EmergencyCallModal />
-      <AIAssistantModal />
       <AuthModal />
 
       {/* Public Service Footer */}
@@ -41,7 +39,7 @@ const MainApp: React.FC = () => {
                 <div className="h-6 w-6 rounded-lg bg-emerald-600 flex items-center justify-center text-white">
                   <ShieldCheck className="w-4 h-4" />
                 </div>
-                <span className="font-extrabold text-white text-sm">DisasterShield</span>
+                <span className="font-extrabold text-white text-sm">ResQsphere</span>
               </div>
               <p className="text-[11px] leading-relaxed text-emerald-200/70">
                 All-in-one disaster preparedness, verified emergency response, and humanitarian relief coordination network for India.
@@ -117,7 +115,7 @@ const MainApp: React.FC = () => {
           </div>
 
           <div className="pt-4 flex flex-wrap items-center justify-between gap-3 text-[11px] text-emerald-300/60">
-            <div>© 2026 DisasterShield Platform · Built for Indian Communities & Emergency Agencies</div>
+            <div>© 2026 ResQsphere Platform · India Disaster Preparedness & Relief Network</div>
             <div className="flex gap-4">
               <span>National Disaster Management Framework</span>
               <span>Open-Meteo Integration</span>

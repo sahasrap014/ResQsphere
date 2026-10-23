@@ -6,14 +6,12 @@ import {
   AssistanceCategory,
   RequestPriority,
 } from '../types/disaster';
+import { validateIndianMobile } from '../utils/phoneValidation';
 import {
   AlertCircle,
   Home,
-  Navigation,
   Utensils,
   Wrench,
-  Shield,
-  ShieldCheck,
   FileCheck,
   CheckSquare,
   Square,
@@ -29,6 +27,7 @@ import {
   Flame,
   Droplets,
   HeartPulse,
+  AlertTriangle,
 } from 'lucide-react';
 
 export const CitizenPortal: React.FC = () => {
@@ -48,8 +47,9 @@ export const CitizenPortal: React.FC = () => {
     setIsAuthModalOpen,
   } = useDisaster();
 
-  // Active form feedback
+  // Active form feedback & validation errors
   const [successFeedback, setSuccessFeedback] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   // Form states:
   // 1. Report Emergency Form
@@ -59,7 +59,7 @@ export const CitizenPortal: React.FC = () => {
   const [incidentDescription, setIncidentDescription] = useState('');
   const [incidentSeverity, setIncidentSeverity] = useState<IncidentSeverity>('high');
   const [peopleTrapped, setPeopleTrapped] = useState<number>(0);
-  const [reportedPhone, setReportedPhone] = useState('');
+  const [reportedPhone, setReportedPhone] = useState(user?.phone || '');
 
   // 2. Request Assistance Form
   const [reqCategory, setReqCategory] = useState<AssistanceCategory>('food');
@@ -68,18 +68,20 @@ export const CitizenPortal: React.FC = () => {
   const [reqLocation, setReqLocation] = useState('');
   const [reqDetails, setReqDetails] = useState('');
   const [reqSpecialNeeds, setReqSpecialNeeds] = useState('');
-  const [reqPhone, setReqPhone] = useState('');
+  const [reqPhone, setReqPhone] = useState(user?.phone || '');
 
   // 3. Property Damage Form
-  const [damagePropertyType, setDamagePropertyType] = useState<'Residential Home' | 'Commercial Building' | 'Agricultural Crop / Farm' | 'Infrastructure / Road'>('Residential Home');
+  const [damagePropertyType, setDamagePropertyType] = useState<
+    'Residential Home' | 'Commercial Building' | 'Agricultural Crop / Farm' | 'Infrastructure / Road'
+  >('Residential Home');
   const [damageSeverity, setDamageSeverity] = useState<'Minor' | 'Moderate' | 'Severe' | 'Total Destruction'>('Moderate');
   const [damageLocation, setDamageLocation] = useState('');
   const [damageLossInr, setDamageLossInr] = useState('');
   const [isHazard, setIsHazard] = useState(false);
   const [damageDesc, setDamageDesc] = useState('');
-  const [damagePhone, setDamagePhone] = useState('');
+  const [damagePhone, setDamagePhone] = useState(user?.phone || '');
 
-  // Citizen's requests (privacy filter: if user logged in, match user id/email or show citizen requests)
+  // Privacy-filtered Citizen submissions
   const myEmergencyReports = incidents.filter(
     (inc) =>
       (user && inc.reportedBy?.toLowerCase().includes(user.fullName?.toLowerCase())) ||
@@ -97,10 +99,18 @@ export const CitizenPortal: React.FC = () => {
 
   const myDamageReports = damageReports;
 
-  // Handlers
+  // Handlers with Indian Mobile Validation
   const handleReportEmergency = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     if (!incidentTitle || !incidentLocation || !incidentDescription) return;
+
+    const phoneToCheck = reportedPhone || user?.phone || '';
+    const phoneVal = validateIndianMobile(phoneToCheck);
+    if (!phoneVal.isValid) {
+      setFormError(phoneVal.error || 'Enter a valid 10-digit Indian mobile number.');
+      return;
+    }
 
     submitEmergencyReport({
       title: incidentTitle,
@@ -112,7 +122,7 @@ export const CitizenPortal: React.FC = () => {
       severity: incidentSeverity,
       description: incidentDescription,
       reportedBy: user ? user.fullName : 'Verified Citizen',
-      reportedPhone: reportedPhone || '+91 98000 12345',
+      reportedPhone: phoneVal.normalized,
       peopleTrapped,
       casualties: 0,
     });
@@ -130,15 +140,24 @@ export const CitizenPortal: React.FC = () => {
 
   const handleRequestAssistance = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     if (!reqLocation || !reqDetails) return;
+
+    const phoneToCheck = reqPhone || user?.phone || '';
+    const phoneVal = validateIndianMobile(phoneToCheck);
+    if (!phoneVal.isValid) {
+      setFormError(phoneVal.error || 'Enter a valid 10-digit Indian mobile number.');
+      return;
+    }
 
     submitAssistanceRequest({
       citizenName: user ? user.fullName : 'Citizen Applicant',
       citizenId: user ? user.id : 'CIT-CURRENT',
-      phone: reqPhone || '+91 98480 99887',
+      phone: phoneVal.normalized,
       category: reqCategory,
       priority: reqPriority,
       peopleCount: reqPeopleCount,
+      quantityRequested: reqPeopleCount * 2,
       location: reqLocation,
       district: 'East Godavari Simulation Sector',
       lat: 16.985 + (Math.random() - 0.5) * 0.02,
@@ -159,12 +178,20 @@ export const CitizenPortal: React.FC = () => {
 
   const handleReportDamage = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     if (!damageLocation || !damageDesc) return;
+
+    const phoneToCheck = damagePhone || user?.phone || '';
+    const phoneVal = validateIndianMobile(phoneToCheck);
+    if (!phoneVal.isValid) {
+      setFormError(phoneVal.error || 'Enter a valid 10-digit Indian mobile number.');
+      return;
+    }
 
     submitDamageReport({
       citizenName: user ? user.fullName : 'Property Claimant',
       citizenId: user ? user.id : 'CIT-CURRENT',
-      phone: damagePhone || '+91 97000 22334',
+      phone: phoneVal.normalized,
       propertyType: damagePropertyType,
       damageSeverity,
       location: damageLocation,
@@ -186,8 +213,9 @@ export const CitizenPortal: React.FC = () => {
     }, 1500);
   };
 
-  // Six primary action card definitions
-  const sixPrimaryActionCards = [
+  // Requirement 4: EXACTLY FOUR PRIMARY ACTION CARDS
+  // (Family & Personal Safety and View Evacuation Guidance have been completely removed)
+  const fourPrimaryActionCards = [
     {
       id: 'report_emergency',
       title: 'Report an Emergency',
@@ -207,15 +235,6 @@ export const CitizenPortal: React.FC = () => {
       badgeColor: 'bg-sky-100 text-sky-800',
     },
     {
-      id: 'evacuation_guidance',
-      title: 'View Evacuation Guidance',
-      description: 'Official flood route safety protocols, high-ground staging zones, and electrical safety advisories.',
-      icon: Navigation,
-      iconBg: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
-      badge: 'SAFETY PROTOCOLS',
-      badgeColor: 'bg-emerald-100 text-emerald-800',
-    },
-    {
       id: 'request_help',
       title: 'Request Food / Water / Medical Help',
       description: 'Submit urgent requirements for drinking water, dry rations, infant formula, or prescription medicines.',
@@ -233,15 +252,6 @@ export const CitizenPortal: React.FC = () => {
       badge: 'GOVT REVENUE SURVEY',
       badgeColor: 'bg-indigo-100 text-indigo-800',
     },
-    {
-      id: 'safety_guidance',
-      title: 'Family & Personal Safety',
-      description: 'Family emergency meeting plans, vulnerable member safe registration, and reunification guidance.',
-      icon: Shield,
-      iconBg: 'bg-teal-50 text-teal-700 border border-teal-200',
-      badge: 'PREPAREDNESS SUPPORT',
-      badgeColor: 'bg-teal-100 text-teal-800',
-    },
   ];
 
   return (
@@ -254,7 +264,7 @@ export const CitizenPortal: React.FC = () => {
               CITIZEN PORTAL
             </span>
             <span className="text-slate-300">|</span>
-            <span className="text-xs text-slate-500">Public Self-Service & Safety</span>
+            <span className="text-xs text-slate-500">ResQsphere Public Self-Service</span>
           </div>
           <h1 className="text-2xl font-extrabold text-slate-900 font-sans tracking-tight mt-0.5">
             Emergency Assistance & Preparedness Dashboard
@@ -298,7 +308,7 @@ export const CitizenPortal: React.FC = () => {
         </div>
       </div>
 
-      {/* Success Notification */}
+      {/* Notifications */}
       {successFeedback && (
         <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-medium flex items-center gap-3 animate-in fade-in">
           <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
@@ -306,14 +316,21 @@ export const CitizenPortal: React.FC = () => {
         </div>
       )}
 
-      {/* VIEW 1: THE EXACT SIX PRIMARY ACTION CARDS */}
+      {formError && (
+        <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-red-900 text-xs font-medium flex items-center gap-3 animate-in fade-in">
+          <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
+          <span>{formError}</span>
+        </div>
+      )}
+
+      {/* VIEW 1: THE EXACT FOUR PRIMARY ACTION CARDS */}
       {citizenAction === 'main' && (
         <div className="space-y-6">
           <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-2xl p-4 flex items-center justify-between text-xs text-emerald-900">
             <div className="flex items-center gap-3">
-              <Shield className="w-5 h-5 text-emerald-700 shrink-0" />
+              <AlertCircle className="w-5 h-5 text-emerald-700 shrink-0" />
               <div>
-                <span className="font-bold">Citizen Emergency Services:</span> Select an option below to initiate a request or browse verified safety guidance.
+                <span className="font-bold">Citizen Emergency Services:</span> Select an option below to initiate an urgent request or find designated safe shelter.
               </div>
             </div>
             {!user && (
@@ -321,14 +338,14 @@ export const CitizenPortal: React.FC = () => {
                 onClick={() => setIsAuthModalOpen(true)}
                 className="text-xs font-semibold underline text-emerald-800 hover:text-emerald-950"
               >
-                Sign In to auto-save profile details
+                Sign In to track your requests
               </button>
             )}
           </div>
 
-          {/* EXACTLY SIX CARDS ARRANGED IN A RESPONSIVE GRID */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {sixPrimaryActionCards.map((card) => {
+          {/* EXACTLY FOUR CARDS IN RESPONSIVE GRID */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            {fourPrimaryActionCards.map((card) => {
               const Icon = card.icon;
               return (
                 <div
@@ -338,7 +355,9 @@ export const CitizenPortal: React.FC = () => {
                 >
                   <div>
                     <div className="flex items-center justify-between mb-4">
-                      <div className={`h-12 w-12 rounded-2xl ${card.iconBg} flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform`}>
+                      <div
+                        className={`h-12 w-12 rounded-2xl ${card.iconBg} flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform`}
+                      >
                         <Icon className="w-6 h-6" />
                       </div>
                       <span className={`text-[10px] font-bold font-mono px-2 py-0.5 rounded-full ${card.badgeColor}`}>
@@ -398,100 +417,108 @@ export const CitizenPortal: React.FC = () => {
                 value={incidentTitle}
                 onChange={(e) => setIncidentTitle(e.target.value)}
                 placeholder="e.g. Flash flood overflowing canal into residential street"
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-red-600 focus:bg-white transition"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs"
               />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Incident Category *</label>
+                <label className="block font-semibold text-slate-700 mb-1">Emergency Category *</label>
                 <select
                   value={incidentType}
-                  onChange={(e) => setIncidentType(e.target.value as any)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-red-600 focus:bg-white"
+                  onChange={(e) => setIncidentType(e.target.value as IncidentType)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs bg-white"
                 >
                   <option value="Flash Flood">Flash Flood</option>
                   <option value="Severe Waterlogging">Severe Waterlogging</option>
-                  <option value="Trapped Persons / Rescue Required">Trapped Persons / Rescue</option>
                   <option value="Structural Collapse / Damage">Structural Collapse / Damage</option>
+                  <option value="Trapped Persons / Rescue Required">Trapped Persons / Rescue Required</option>
                   <option value="Medical Emergency">Medical Emergency</option>
-                  <option value="Landslide">Landslide</option>
-                  <option value="Electrical / Grid Hazard">Electrical Hazard</option>
+                  <option value="Electrical / Grid Hazard">Electrical / Grid Hazard</option>
                   <option value="Cyclone / High Winds">Cyclone / High Winds</option>
-                  <option value="Fire Outbreak">Fire Outbreak</option>
                   <option value="Other Emergency">Other Emergency</option>
                 </select>
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Estimated Severity *</label>
+                <label className="block font-semibold text-slate-700 mb-1">Perceived Urgency / Severity *</label>
                 <select
                   value={incidentSeverity}
-                  onChange={(e) => setIncidentSeverity(e.target.value as any)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-red-600 focus:bg-white"
+                  onChange={(e) => setIncidentSeverity(e.target.value as IncidentSeverity)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs bg-white"
                 >
-                  <option value="critical">Critical (Immediate Life Danger)</option>
-                  <option value="high">High (Fast Escalating)</option>
-                  <option value="moderate">Moderate (Hazard / Inconvenience)</option>
-                  <option value="low">Low (Precautionary)</option>
+                  <option value="critical">Critical — Immediate Threat to Life</option>
+                  <option value="high">High — Rapidly Worsening / Rescue Needed</option>
+                  <option value="moderate">Moderate — Evacuation Advised</option>
+                  <option value="low">Low — Localized Inconvenience</option>
                 </select>
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Exact Location / Landmark *</label>
+                <label className="block font-semibold text-slate-700 mb-1">Specific Location / Landmark *</label>
                 <input
                   type="text"
                   required
                   value={incidentLocation}
                   onChange={(e) => setIncidentLocation(e.target.value)}
-                  placeholder="e.g. Ward 4, Canal Bund Rd near High School"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-red-600 focus:bg-white transition"
+                  placeholder="e.g. Near Ramalayam Temple, Old Kovvur Lane"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs"
                 />
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">People Trapped / Awaiting Rescue</label>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Contact Mobile Number (10-Digit Indian Mobile) *
+                </label>
                 <input
-                  type="number"
-                  min="0"
-                  value={peopleTrapped}
-                  onChange={(e) => setPeopleTrapped(parseInt(e.target.value) || 0)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-red-600 focus:bg-white"
+                  type="tel"
+                  required
+                  value={reportedPhone}
+                  onChange={(e) => setReportedPhone(e.target.value)}
+                  placeholder="+91 98480 12345"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Detailed Description *</label>
-              <textarea
-                required
-                rows={3}
-                value={incidentDescription}
-                onChange={(e) => setIncidentDescription(e.target.value)}
-                placeholder="Describe current water depth, flow speed, landmarks, vulnerable people, or urgent assistance needs..."
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-red-600 focus:bg-white transition"
+              <label className="block font-semibold text-slate-700 mb-1">Number of People Trapped or Cut Off</label>
+              <input
+                type="number"
+                min="0"
+                value={peopleTrapped}
+                onChange={(e) => setPeopleTrapped(parseInt(e.target.value) || 0)}
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs"
               />
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Contact Phone Number</label>
-              <input
-                type="tel"
-                value={reportedPhone}
-                onChange={(e) => setReportedPhone(e.target.value)}
-                placeholder="+91 98XXX XXXXX"
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-red-600 focus:bg-white"
+              <label className="block font-semibold text-slate-700 mb-1">Detailed Situation Description *</label>
+              <textarea
+                required
+                rows={4}
+                value={incidentDescription}
+                onChange={(e) => setIncidentDescription(e.target.value)}
+                placeholder="Describe water depth, current speed, presence of children or elderly citizens, and safest access route."
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs"
               />
             </div>
 
-            <div className="pt-3">
+            <div className="pt-2 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setCitizenAction('main')}
+                className="px-4 py-2.5 rounded-xl text-slate-600 hover:bg-slate-100 font-semibold"
+              >
+                Cancel
+              </button>
               <button
                 type="submit"
-                className="w-full py-3 px-4 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-md shadow-red-950/20 transition"
+                className="bg-red-600 hover:bg-red-700 text-white font-bold px-6 py-2.5 rounded-xl shadow-xs transition"
               >
-                Submit Emergency Report for Authority Verification
+                Transmit Emergency Report
               </button>
             </div>
           </form>
@@ -501,153 +528,97 @@ export const CitizenPortal: React.FC = () => {
       {/* VIEW 3: FIND SAFE SHELTER */}
       {citizenAction === 'find_shelter' && (
         <div className="space-y-4">
-          <button
-            onClick={() => setCitizenAction('main')}
-            className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Back to Citizen Services</span>
-          </button>
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => setCitizenAction('main')}
+              className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Back to Citizen Services</span>
+            </button>
+            <span className="text-xs text-slate-500">{shelters.length} Designated Evacuation Safe Centers</span>
+          </div>
 
-          <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs">
-            <h2 className="text-lg font-bold text-slate-900 mb-1">Verified Relief Shelters & Safe Camps</h2>
-            <p className="text-xs text-slate-500 mb-6">
-              Official shelters with clean potable water, kitchen facilities, medical booths, and high-ground protection.
-            </p>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {shelters.map((shelter) => (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {shelters.map((shelter) => {
+              const occupancyPct = Math.round((shelter.currentOccupancy / shelter.capacity) * 100);
+              const isFull = shelter.status === 'full' || occupancyPct >= 100;
+              return (
                 <div
                   key={shelter.id}
-                  className="bg-slate-50/60 rounded-2xl border border-slate-200 p-5 flex flex-col justify-between"
+                  className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs flex flex-col justify-between"
                 >
                   <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] font-bold font-mono text-slate-500">{shelter.id}</span>
+                    <div className="flex items-center justify-between mb-3">
                       <span
-                        className={`text-[9px] font-bold px-2 py-0.5 rounded capitalize ${
-                          shelter.status === 'full'
-                            ? 'bg-purple-100 text-purple-800'
+                        className={`text-[10px] font-bold font-mono px-2 py-0.5 rounded-full ${
+                          isFull
+                            ? 'bg-red-100 text-red-800'
                             : shelter.status === 'near_capacity'
                             ? 'bg-amber-100 text-amber-800'
                             : 'bg-emerald-100 text-emerald-800'
                         }`}
                       >
-                        {shelter.status.replace('_', ' ')}
+                        {isFull ? 'CAMP FULL' : shelter.status === 'near_capacity' ? 'NEAR CAPACITY' : 'SPACE AVAILABLE'}
+                      </span>
+                      <span className="text-[11px] font-mono text-slate-400">
+                        {shelter.currentOccupancy}/{shelter.capacity}
                       </span>
                     </div>
 
-                    <h3 className="font-bold text-sm text-slate-900 leading-snug">{shelter.name}</h3>
+                    <h3 className="font-bold text-base text-slate-900">{shelter.name}</h3>
                     <p className="text-xs text-slate-500 mt-1 flex items-start gap-1">
                       <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
                       <span>{shelter.address}</span>
                     </p>
 
                     {/* Occupancy bar */}
-                    <div className="mt-4 pt-3 border-t border-slate-200">
-                      <div className="flex justify-between text-xs font-semibold text-slate-700 mb-1">
-                        <span>Capacity: {shelter.capacity}</span>
-                        <span>Occupied: {shelter.currentOccupancy} ({shelter.capacity - shelter.currentOccupancy} free)</span>
+                    <div className="mt-4 space-y-1">
+                      <div className="flex justify-between text-[11px] text-slate-500">
+                        <span>Current Occupancy</span>
+                        <span className="font-semibold text-slate-700">{occupancyPct}%</span>
                       </div>
-                      <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
                         <div
                           className={`h-full rounded-full ${
-                            shelter.currentOccupancy >= shelter.capacity
-                              ? 'bg-purple-600'
-                              : shelter.currentOccupancy >= shelter.capacity * 0.85
-                              ? 'bg-amber-500'
-                              : 'bg-emerald-600'
+                            occupancyPct >= 90 ? 'bg-red-600' : occupancyPct >= 75 ? 'bg-amber-500' : 'bg-emerald-600'
                           }`}
-                          style={{
-                            width: `${Math.min(100, Math.round((shelter.currentOccupancy / shelter.capacity) * 100))}%`,
-                          }}
+                          style={{ width: `${Math.min(100, occupancyPct)}%` }}
                         />
                       </div>
                     </div>
 
-                    {/* Facilities Pills */}
-                    <div className="mt-3 flex flex-wrap gap-1">
+                    {/* Facilities badges */}
+                    <div className="mt-4 flex flex-wrap gap-1">
                       {shelter.facilities.map((fac, i) => (
-                        <span key={i} className="text-[10px] bg-white border border-slate-200 px-2 py-0.5 rounded-md text-slate-600">
+                        <span key={i} className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">
                           {fac}
                         </span>
                       ))}
                     </div>
                   </div>
 
-                  <div className="mt-4 pt-3 border-t border-slate-200 text-xs text-slate-600 flex items-center justify-between">
+                  <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
                     <div>
-                      <span className="text-[10px] text-slate-400 block">Contact Officer</span>
-                      <span className="font-medium text-slate-800">{shelter.contactPerson}</span>
+                      <span className="text-[10px] text-slate-400 block">Camp Contact</span>
+                      <span className="font-medium text-slate-700">{shelter.contactPerson}</span>
                     </div>
                     <a
                       href={`tel:${shelter.contactPhone}`}
-                      className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-semibold transition"
+                      className="inline-flex items-center gap-1 text-emerald-800 font-bold hover:underline"
                     >
-                      Call Camp
+                      <Phone className="w-3.5 h-3.5" />
+                      <span>{shelter.contactPhone}</span>
                     </a>
                   </div>
                 </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
         </div>
       )}
 
-      {/* VIEW 4: VIEW EVACUATION GUIDANCE */}
-      {citizenAction === 'evacuation_guidance' && (
-        <div className="space-y-4 max-w-4xl mx-auto">
-          <button
-            onClick={() => setCitizenAction('main')}
-            className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Back to Citizen Services</span>
-          </button>
-
-          <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-6">
-            <div>
-              <span className="text-[10px] font-bold font-mono text-emerald-800 uppercase tracking-wider">
-                SAFETY & EVACUATION PROTOCOLS
-              </span>
-              <h2 className="text-xl font-bold text-slate-900 mt-1">Official Flood Safety Guidelines</h2>
-              <p className="text-xs text-slate-500">
-                Follow these protocols to safely evacuate and avoid hazardous floodwater currents.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-red-50 border border-red-200 rounded-2xl p-5 text-xs text-red-950 space-y-2">
-                <h3 className="font-bold text-red-900 text-sm flex items-center gap-1.5">
-                  <AlertCircle className="w-4 h-4 text-red-600" />
-                  What NOT to Do During Floods
-                </h3>
-                <ul className="list-disc list-inside space-y-1.5 text-red-900/90 leading-relaxed">
-                  <li><strong>Never walk through moving water:</strong> Fast-moving water just 15cm deep can sweep an adult off their feet.</li>
-                  <li><strong>Do not drive over submerged causeways:</strong> Water hides washed-out roadbeds and culverts.</li>
-                  <li><strong>Avoid downed power cables:</strong> Live electrical wires in standing water create fatal shock zones.</li>
-                  <li><strong>Do not consume raw tap water:</strong> Sewage backflow contaminates water table pipelines.</li>
-                </ul>
-              </div>
-
-              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 text-xs text-emerald-950 space-y-2">
-                <h3 className="font-bold text-emerald-900 text-sm flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                  Recommended Evacuation Steps
-                </h3>
-                <ul className="list-disc list-inside space-y-1.5 text-emerald-900/90 leading-relaxed">
-                  <li><strong>Switch off main circuit breaker</strong> and gas valve before leaving the premises.</li>
-                  <li><strong>Pack critical documents</strong> (Aadhaar, property deed, bank records) in waterproof ziplock bags.</li>
-                  <li><strong>Wear sturdy footwear</strong> to protect feet from submerged debris, snakes, or glass.</li>
-                  <li><strong>Follow official designated high-elevation routes</strong> to your assigned relief shelter.</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* VIEW 5: REQUEST FOOD / WATER / MEDICAL HELP */}
+      {/* VIEW 4: REQUEST FOOD / WATER / MEDICAL HELP */}
       {citizenAction === 'request_help' && (
         <div className="bg-white rounded-3xl border border-slate-200/90 p-6 sm:p-8 shadow-xs max-w-2xl mx-auto">
           <button
@@ -663,9 +634,9 @@ export const CitizenPortal: React.FC = () => {
               <Utensils className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-900">Request Relief Assistance</h2>
+              <h2 className="text-lg font-bold text-slate-900">Request Relief Supplies & Assistance</h2>
               <p className="text-xs text-slate-500">
-                Your request is directly visible to disaster authorities and accredited relief partners for supply dispatch.
+                Directly matches with registered NGOs, Civil Supplies, and community relief kitchens.
               </p>
             </div>
           </div>
@@ -673,18 +644,19 @@ export const CitizenPortal: React.FC = () => {
           <form onSubmit={handleRequestAssistance} className="space-y-4 text-xs">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Assistance Category *</label>
+                <label className="block font-semibold text-slate-700 mb-1">Relief Category *</label>
                 <select
                   value={reqCategory}
-                  onChange={(e) => setReqCategory(e.target.value as any)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-emerald-600 focus:bg-white"
+                  onChange={(e) => setReqCategory(e.target.value as AssistanceCategory)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs bg-white"
                 >
-                  <option value="food">Ready-to-Eat Food / Rations</option>
-                  <option value="water">Potable Drinking Water</option>
-                  <option value="medical">Medical Supplies / Prescriptions</option>
-                  <option value="clothing">Blankets & Dry Clothing</option>
-                  <option value="rescue">Boat Pickup / Evacuation Assist</option>
-                  <option value="shelter">Emergency Camp Placement</option>
+                  <option value="food">Ready-to-Eat Food / Dry Rations</option>
+                  <option value="water">Potable Drinking Water (Cans / Tankers)</option>
+                  <option value="medical">Prescription Medicines / First Aid / Insulin</option>
+                  <option value="clothing">Blankets / Dry Clothing / Tarpaulins</option>
+                  <option value="sanitation">Sanitary Napkins / Chlorine Tablets / Soap</option>
+                  <option value="shelter">Emergency Safe Shelter Space</option>
+                  <option value="rescue">Evacuation Boat Transport</option>
                 </select>
               </div>
 
@@ -692,82 +664,93 @@ export const CitizenPortal: React.FC = () => {
                 <label className="block font-semibold text-slate-700 mb-1">Urgency Priority *</label>
                 <select
                   value={reqPriority}
-                  onChange={(e) => setReqPriority(e.target.value as any)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-emerald-600 focus:bg-white"
+                  onChange={(e) => setReqPriority(e.target.value as RequestPriority)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs bg-white"
                 >
-                  <option value="urgent">Urgent (Immediate Need)</option>
-                  <option value="high">High (Needed within 4 hours)</option>
-                  <option value="medium">Medium (Needed today)</option>
-                  <option value="low">Low (Replenishment)</option>
+                  <option value="urgent">Urgent — Severe Deprivation Within 6 Hours</option>
+                  <option value="high">High — Needed Today</option>
+                  <option value="medium">Medium — Supplies Low for Tomorrow</option>
+                  <option value="low">Low — General Relief Request</option>
                 </select>
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Number of People Affected *</label>
+                <label className="block font-semibold text-slate-700 mb-1">Number of People in Need *</label>
                 <input
                   type="number"
                   min="1"
                   required
                   value={reqPeopleCount}
                   onChange={(e) => setReqPeopleCount(parseInt(e.target.value) || 1)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-emerald-600 focus:bg-white"
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs"
                 />
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Contact Phone *</label>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Contact Mobile Number (10-Digit Indian Mobile) *
+                </label>
                 <input
                   type="tel"
                   required
                   value={reqPhone}
                   onChange={(e) => setReqPhone(e.target.value)}
-                  placeholder="+91 98XXX XXXXX"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-emerald-600 focus:bg-white"
+                  placeholder="+91 98480 12345"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Exact Location / Stranded Address *</label>
+              <label className="block font-semibold text-slate-700 mb-1">Delivery / Staging Location *</label>
               <input
                 type="text"
                 required
                 value={reqLocation}
                 onChange={(e) => setReqLocation(e.target.value)}
-                placeholder="e.g. Terrace of House 42, Weavers Colony, Ward 9"
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-emerald-600 focus:bg-white"
+                placeholder="e.g. 1st Floor Terrace, D.No 12-4-8, Arya Samaj Street"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs"
               />
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Specific Details & Quantity *</label>
+              <label className="block font-semibold text-slate-700 mb-1">
+                Specific Medical or Dietary Needs (Optional)
+              </label>
+              <input
+                type="text"
+                value={reqSpecialNeeds}
+                onChange={(e) => setReqSpecialNeeds(e.target.value)}
+                placeholder="e.g. Baby formula, Diabetics (need sugar-free / insulin), Elderly mobility support"
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Details & Special Instructions *</label>
               <textarea
                 required
                 rows={3}
                 value={reqDetails}
                 onChange={(e) => setReqDetails(e.target.value)}
-                placeholder="Explain what items are needed, current water access, or condition of stranded individuals..."
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-emerald-600 focus:bg-white"
+                placeholder="Describe current stock remaining and safest approach route for relief vehicles or boats."
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs"
               />
             </div>
 
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Vulnerable Needs (Infants, Elderly, Diabetes, Pregnancy)</label>
-              <input
-                type="text"
-                value={reqSpecialNeeds}
-                onChange={(e) => setReqSpecialNeeds(e.target.value)}
-                placeholder="e.g. 1 baby formula needed, 1 insulin patient"
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-emerald-600 focus:bg-white"
-              />
-            </div>
-
-            <div className="pt-3">
+            <div className="pt-2 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setCitizenAction('main')}
+                className="px-4 py-2.5 rounded-xl text-slate-600 hover:bg-slate-100 font-semibold"
+              >
+                Cancel
+              </button>
               <button
                 type="submit"
-                className="w-full py-3 px-4 bg-[#1B4332] hover:bg-[#245740] text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-950/20 transition"
+                className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-6 py-2.5 rounded-xl shadow-xs transition"
               >
                 Submit Assistance Request
               </button>
@@ -776,7 +759,7 @@ export const CitizenPortal: React.FC = () => {
         </div>
       )}
 
-      {/* VIEW 6: REPORT PROPERTY DAMAGE */}
+      {/* VIEW 5: REPORT PROPERTY DAMAGE */}
       {citizenAction === 'report_damage' && (
         <div className="bg-white rounded-3xl border border-slate-200/90 p-6 sm:p-8 shadow-xs max-w-2xl mx-auto">
           <button
@@ -792,9 +775,9 @@ export const CitizenPortal: React.FC = () => {
               <Wrench className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-900">Report Property or Crop Damage</h2>
+              <h2 className="text-lg font-bold text-slate-900">Report Property or Agricultural Damage</h2>
               <p className="text-xs text-slate-500">
-                Submit damage claims for state government revenue survey verification and compensation schemes.
+                Log structural or crop inundation for official state disaster compensation assessment.
               </p>
             </div>
           </div>
@@ -802,44 +785,60 @@ export const CitizenPortal: React.FC = () => {
           <form onSubmit={handleReportDamage} className="space-y-4 text-xs">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Property Type *</label>
+                <label className="block font-semibold text-slate-700 mb-1">Property Classification *</label>
                 <select
                   value={damagePropertyType}
                   onChange={(e) => setDamagePropertyType(e.target.value as any)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-indigo-600 focus:bg-white"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs bg-white"
                 >
-                  <option value="Residential Home">Residential Home / Hut</option>
-                  <option value="Agricultural Crop / Farm">Agricultural Crop / Farm Field</option>
-                  <option value="Commercial Building">Commercial Shop / Store</option>
-                  <option value="Infrastructure / Road">Local Boundary Wall / Borewell</option>
+                  <option value="Residential Home">Residential Home</option>
+                  <option value="Commercial Building">Commercial Shop / Small Enterprise</option>
+                  <option value="Agricultural Crop / Farm">Agricultural Crop / Farm Inundation</option>
+                  <option value="Infrastructure / Road">Community Approach Road / Culvert</option>
                 </select>
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Severity of Damage *</label>
+                <label className="block font-semibold text-slate-700 mb-1">Damage Severity *</label>
                 <select
                   value={damageSeverity}
                   onChange={(e) => setDamageSeverity(e.target.value as any)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-indigo-600 focus:bg-white"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs bg-white"
                 >
-                  <option value="Total Destruction">Total Destruction (Collapsed / Scoured)</option>
-                  <option value="Severe">Severe (Structural Cracks / Submerged)</option>
-                  <option value="Moderate">Moderate (Inventory / Waterlogged)</option>
-                  <option value="Minor">Minor (Wall Plaster / Roof Tiles)</option>
+                  <option value="Total Destruction">Total Destruction — Uninhabitable</option>
+                  <option value="Severe">Severe — Roof or Wall Collapsed</option>
+                  <option value="Moderate">Moderate — 1m+ Mud & Water Ingress</option>
+                  <option value="Minor">Minor — Ground Dampness / Boundary Damage</option>
                 </select>
               </div>
             </div>
 
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Location / Survey / Plot Number *</label>
-              <input
-                type="text"
-                required
-                value={damageLocation}
-                onChange={(e) => setDamageLocation(e.target.value)}
-                placeholder="e.g. Survey No. 128, Kadiyam Mandal / Plot 14, Main Road"
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-indigo-600 focus:bg-white"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Property Address / Survey No *</label>
+                <input
+                  type="text"
+                  required
+                  value={damageLocation}
+                  onChange={(e) => setDamageLocation(e.target.value)}
+                  placeholder="e.g. Sy No 142/2, Main Road, Danavaipeta"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Contact Mobile Number (10-Digit Indian Mobile) *
+                </label>
+                <input
+                  type="tel"
+                  required
+                  value={damagePhone}
+                  onChange={(e) => setDamagePhone(e.target.value)}
+                  placeholder="+91 98480 12345"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs"
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -849,328 +848,240 @@ export const CitizenPortal: React.FC = () => {
                   type="text"
                   value={damageLossInr}
                   onChange={(e) => setDamageLossInr(e.target.value)}
-                  placeholder="e.g. ₹ 2,50,000"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-indigo-600 focus:bg-white"
+                  placeholder="e.g. ₹1,50,000"
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs"
                 />
               </div>
 
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Contact Phone</label>
-                <input
-                  type="tel"
-                  value={damagePhone}
-                  onChange={(e) => setDamagePhone(e.target.value)}
-                  placeholder="+91 97XXX XXXXX"
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-indigo-600 focus:bg-white"
-                />
+              <div className="flex items-center pt-5">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isHazard}
+                    onChange={(e) => setIsHazard(e.target.checked)}
+                    className="rounded text-red-600 focus:ring-red-500 h-4 w-4"
+                  />
+                  <span className="text-xs text-red-800 font-semibold">Immediate Structural / Electric Hazard Present</span>
+                </label>
               </div>
-            </div>
-
-            <div className="flex items-center gap-2 pt-1">
-              <input
-                type="checkbox"
-                id="hazard"
-                checked={isHazard}
-                onChange={(e) => setIsHazard(e.target.checked)}
-                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-              />
-              <label htmlFor="hazard" className="text-xs font-semibold text-red-700 cursor-pointer">
-                Immediate Structural Hazard: Risk of sudden wall or ceiling collapse
-              </label>
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Damage Description *</label>
+              <label className="block font-semibold text-slate-700 mb-1">Damage Description & Circumstances *</label>
               <textarea
                 required
                 rows={3}
                 value={damageDesc}
                 onChange={(e) => setDamageDesc(e.target.value)}
-                placeholder="Explain the extent of inundation, wall scouring, loss of crops or equipment..."
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-hidden focus:border-indigo-600 focus:bg-white"
+                placeholder="Detail floodwater depth inside structure, collapsed walls, lost harvest acres, or electrical meter submersion."
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-600 text-xs"
               />
             </div>
 
-            <div className="pt-3">
+            <div className="pt-2 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setCitizenAction('main')}
+                className="px-4 py-2.5 rounded-xl text-slate-600 hover:bg-slate-100 font-semibold"
+              >
+                Cancel
+              </button>
               <button
                 type="submit"
-                className="w-full py-3 px-4 bg-indigo-700 hover:bg-indigo-800 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-950/20 transition"
+                className="bg-indigo-700 hover:bg-indigo-800 text-white font-bold px-6 py-2.5 rounded-xl shadow-xs transition"
               >
-                Submit Damage Survey Assessment
+                Register Damage Report
               </button>
             </div>
           </form>
         </div>
       )}
 
-      {/* VIEW 7: FAMILY & PERSONAL SAFETY */}
-      {citizenAction === 'safety_guidance' && (
-        <div className="space-y-4 max-w-4xl mx-auto">
-          <button
-            onClick={() => setCitizenAction('main')}
-            className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Back to Citizen Services</span>
-          </button>
-
-          <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-6">
-            <div>
-              <span className="text-[10px] font-bold font-mono text-teal-800 uppercase tracking-wider">
-                PERSONAL & COMMUNITY SAFETY
-              </span>
-              <h2 className="text-xl font-bold text-slate-900 mt-1">Family Emergency Action Plan</h2>
-              <p className="text-xs text-slate-500">
-                Practical preparedness steps to protect vulnerable family members and ensure reunification.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-2">
-                <div className="h-8 w-8 rounded-xl bg-teal-100 text-teal-800 flex items-center justify-center font-bold text-xs">
-                  1
-                </div>
-                <h3 className="font-bold text-slate-900 text-xs">Pre-Identified Meeting Place</h3>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Designate an elevated, recognizable landmark outside your flood zone (e.g., Zilla Parishad High School or Community Hall) where family members meet if separated.
-                </p>
-              </div>
-
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-2">
-                <div className="h-8 w-8 rounded-xl bg-teal-100 text-teal-800 flex items-center justify-center font-bold text-xs">
-                  2
-                </div>
-                <h3 className="font-bold text-slate-900 text-xs">Out-of-District Contact</h3>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Memorize one relative's phone number located outside the disaster district. During local tower congestion, long-distance SMS text messages are more likely to transmit.
-                </p>
-              </div>
-
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-2">
-                <div className="h-8 w-8 rounded-xl bg-teal-100 text-teal-800 flex items-center justify-center font-bold text-xs">
-                  3
-                </div>
-                <h3 className="font-bold text-slate-900 text-xs">Elderly & Infant Safeguards</h3>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Fasten an identification tag or wristband with emergency contact details and medical conditions on children, seniors, and persons with disabilities.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* VIEW 8: MY REQUESTS (CITIZEN TRACKING AREA) */}
+      {/* VIEW 6: MY REQUESTS & INCIDENTS (Privacy-Preserved Tracking) */}
       {citizenAction === 'my_requests' && (
         <div className="space-y-6">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+          <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-bold text-slate-900">My Requests & Emergency Reports</h2>
+              <h2 className="text-xl font-bold text-slate-900">My Emergency Submissions & Tracking</h2>
               <p className="text-xs text-slate-500">
-                Track live verification status, assigned responder teams, and fulfillment updates for your submissions.
+                Track status updates and response dispatches for your submitted incidents and relief requests.
               </p>
             </div>
             <button
               onClick={() => setCitizenAction('main')}
-              className="text-xs font-semibold text-emerald-800 hover:underline flex items-center gap-1"
+              className="text-xs text-emerald-800 font-semibold hover:underline"
             >
-              <span>+ New Submission</span>
+              ← Back to Services
             </button>
           </div>
 
-          {/* Section 1: Assistance Requests */}
-          <div className="space-y-3">
-            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-mono">
-              Relief Assistance Submissions ({myAssistanceRequests.length})
+          {/* Section: Assistance Requests */}
+          <div className="bg-white rounded-3xl border border-slate-200/90 p-6 shadow-xs space-y-4">
+            <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+              <Utensils className="w-4 h-4 text-emerald-700" />
+              <span>Assistance & Relief Requests ({myAssistanceRequests.length})</span>
             </h3>
 
-            {myAssistanceRequests.length > 0 ? (
+            {myAssistanceRequests.length === 0 ? (
+              <div className="py-8 text-center text-xs text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                <p>No active relief assistance requests submitted yet.</p>
+                <button
+                  onClick={() => setCitizenAction('request_help')}
+                  className="mt-2 text-emerald-800 font-bold underline"
+                >
+                  Submit a Relief Request
+                </button>
+              </div>
+            ) : (
               <div className="space-y-3">
                 {myAssistanceRequests.map((req) => (
-                  <div
-                    key={req.id}
-                    className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                  >
-                    <div className="space-y-1 max-w-xl">
+                  <div key={req.id} className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 text-xs space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-[10px] font-bold text-slate-500">{req.id}</span>
-                        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-slate-100 text-slate-800">
+                        <span className="font-mono font-bold text-slate-800">{req.id}</span>
+                        <span className="capitalize px-2 py-0.5 rounded-full bg-slate-200 text-slate-800 font-semibold text-[10px]">
                           {req.category}
                         </span>
                         <span
-                          className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${
-                            req.status === 'fulfilled'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : req.status === 'matched'
-                              ? 'bg-sky-100 text-sky-800'
-                              : 'bg-amber-100 text-amber-800'
+                          className={`uppercase text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            req.priority === 'urgent'
+                              ? 'bg-red-100 text-red-800'
+                              : req.priority === 'high'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-slate-100 text-slate-700'
                           }`}
                         >
-                          Status: {req.status}
+                          {req.priority}
                         </span>
                       </div>
 
-                      <h4 className="font-bold text-sm text-slate-900">{req.details}</h4>
-                      <p className="text-xs text-slate-500 flex items-center gap-1">
-                        <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span>{req.location} ({req.peopleCount} people affected)</span>
-                      </p>
-
-                      {req.fulfilledBy && (
-                        <div className="text-xs text-emerald-800 font-semibold pt-1">
-                          Fulfilled / Committed by: {req.fulfilledBy}
-                        </div>
-                      )}
+                      <span
+                        className={`text-[10px] font-mono px-2.5 py-0.5 rounded-full font-bold ${
+                          req.status === 'fulfilled'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : req.status === 'partially_fulfilled'
+                            ? 'bg-sky-100 text-sky-800'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {req.status === 'fulfilled'
+                          ? '✓ FULFILLED'
+                          : req.status === 'partially_fulfilled'
+                          ? `PARTIALLY FULFILLED (${req.quantityFulfilled}/${req.quantityRequested})`
+                          : 'PENDING ALLOCATION'}
+                      </span>
                     </div>
 
-                    <div className="text-right text-[11px] text-slate-400 shrink-0">
-                      <span>Submitted: {new Date(req.requestedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    <p className="text-slate-700">{req.details}</p>
+
+                    <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-200/60">
+                      <span>📍 {req.location}</span>
+                      <span>Requested: {new Date(req.requestedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      {req.fulfilledBy && (
+                        <span className="text-emerald-700 font-semibold">Matched: {req.fulfilledBy}</span>
+                      )}
                     </div>
                   </div>
                 ))}
-              </div>
-            ) : (
-              <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-8 text-center text-xs text-slate-500">
-                <Info className="w-6 h-6 text-slate-300 mx-auto mb-2" />
-                <p className="font-semibold text-slate-700">No Assistance Requests Submitted</p>
-                <p className="mt-0.5">You have not submitted any food, water, or medical requests yet.</p>
-                <button
-                  onClick={() => setCitizenAction('request_help')}
-                  className="mt-3 px-3 py-1.5 bg-[#1B4332] text-white rounded-xl text-xs font-semibold"
-                >
-                  Request Help Now
-                </button>
               </div>
             )}
           </div>
 
-          {/* Section 2: Emergency Incident Reports */}
-          <div className="space-y-3 pt-4">
-            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-mono">
-              Emergency Incident Submissions ({myEmergencyReports.length})
+          {/* Section: Emergency Incidents */}
+          <div className="bg-white rounded-3xl border border-slate-200/90 p-6 shadow-xs space-y-4">
+            <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-600" />
+              <span>Reported Emergencies ({myEmergencyReports.length})</span>
             </h3>
 
-            {myEmergencyReports.length > 0 ? (
+            {myEmergencyReports.length === 0 ? (
+              <div className="py-8 text-center text-xs text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                <p>No emergency incident reports registered.</p>
+              </div>
+            ) : (
               <div className="space-y-3">
                 {myEmergencyReports.map((inc) => (
-                  <div
-                    key={inc.id}
-                    className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                  >
-                    <div className="space-y-1 max-w-xl">
+                  <div key={inc.id} className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 text-xs space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-[10px] font-bold text-slate-500">{inc.id}</span>
-                        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-slate-100 text-slate-800">
-                          {inc.type}
-                        </span>
-                        <span
-                          className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${
-                            inc.status === 'verified' || inc.status === 'in_progress'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : inc.status === 'rejected'
-                              ? 'bg-slate-200 text-slate-700'
-                              : 'bg-amber-100 text-amber-800'
-                          }`}
-                        >
-                          Status: {inc.status.replace('_', ' ')}
-                        </span>
+                        <span className="font-mono font-bold text-slate-800">{inc.id}</span>
+                        <h4 className="font-bold text-slate-900">{inc.title}</h4>
                       </div>
-
-                      <h4 className="font-bold text-sm text-slate-900">{inc.title}</h4>
-                      <p className="text-xs text-slate-500 flex items-center gap-1">
-                        <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span>{inc.location}</span>
-                      </p>
-
-                      {inc.assignedTeamName && (
-                        <div className="text-xs text-emerald-800 font-semibold pt-1">
-                          Dispatched Team: {inc.assignedTeamName}
-                        </div>
-                      )}
+                      <span
+                        className={`text-[10px] font-mono px-2.5 py-0.5 rounded-full font-bold ${
+                          inc.status === 'verified'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : inc.status === 'dispatched'
+                            ? 'bg-sky-100 text-sky-800'
+                            : inc.status === 'resolved'
+                            ? 'bg-slate-200 text-slate-800'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {inc.status.toUpperCase().replace('_', ' ')}
+                      </span>
                     </div>
 
-                    <div className="text-right text-[11px] text-slate-400 shrink-0">
-                      <span>Reported: {new Date(inc.reportedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    <p className="text-slate-600">{inc.description}</p>
+
+                    <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-200/60">
+                      <span>📍 {inc.location}</span>
+                      {inc.assignedTeamName && (
+                        <span className="text-sky-700 font-semibold">Dispatched: {inc.assignedTeamName}</span>
+                      )}
                     </div>
                   </div>
                 ))}
-              </div>
-            ) : (
-              <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-8 text-center text-xs text-slate-500">
-                <Info className="w-6 h-6 text-slate-300 mx-auto mb-2" />
-                <p className="font-semibold text-slate-700">No Emergency Incident Reports</p>
-                <p className="mt-0.5">You have not reported any flood or life-safety emergencies.</p>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* VIEW 9: PREPAREDNESS CHECKLIST (MOVED FROM HOME) */}
+      {/* VIEW 7: PREPAREDNESS CHECKLIST (Preserved Feature) */}
       {citizenAction === 'checklist' && (
-        <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs max-w-3xl mx-auto space-y-6">
-          <button
-            onClick={() => setCitizenAction('main')}
-            className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Back to Citizen Services</span>
-          </button>
-
-          <div>
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold font-mono text-emerald-800 uppercase tracking-wider">
-                  CITIZEN READINESS
-                </span>
-                <h2 className="text-xl font-bold text-slate-900 mt-1">Disaster Preparedness Checklist</h2>
-              </div>
-              <div className="text-right">
-                <span className="text-xs font-bold text-emerald-800">
-                  {checklist.filter((c) => c.completed).length} of {checklist.length} Complete
-                </span>
-              </div>
+        <div className="bg-white rounded-3xl border border-slate-200/90 p-6 sm:p-8 shadow-xs max-w-3xl mx-auto space-y-6">
+          <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+            <div>
+              <button
+                onClick={() => setCitizenAction('main')}
+                className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800 mb-2"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Back to Citizen Services</span>
+              </button>
+              <h2 className="text-xl font-bold text-slate-900 mt-1">Disaster Preparedness Checklist</h2>
+              <p className="text-xs text-slate-500">
+                Track and verify essential household emergency items before cyclone and flood escalation.
+              </p>
             </div>
-
-            {/* Checklist Progress Bar */}
-            <div className="mt-3 w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-              <div
-                className="bg-emerald-600 h-full rounded-full transition-all duration-300"
-                style={{
-                  width: `${Math.round((checklist.filter((c) => c.completed).length / checklist.length) * 100)}%`,
-                }}
-              />
-            </div>
-            <p className="text-xs text-slate-500 mt-2">
-              Review and mark items as you assemble your household emergency supply kit. Your progress is saved automatically.
-            </p>
           </div>
 
-          <div className="space-y-3 pt-2">
+          <div className="space-y-3">
             {checklist.map((item) => (
               <div
                 key={item.id}
                 onClick={() => toggleChecklistItem(item.id)}
                 className={`p-4 rounded-2xl border transition-all cursor-pointer flex items-start gap-3.5 ${
                   item.completed
-                    ? 'bg-emerald-50/50 border-emerald-200'
-                    : 'bg-white border-slate-200 hover:bg-slate-50'
+                    ? 'bg-emerald-50/60 border-emerald-300 text-emerald-950'
+                    : 'bg-white border-slate-200 hover:border-emerald-300 text-slate-800'
                 }`}
               >
                 <div className="mt-0.5 text-emerald-700 shrink-0">
-                  {item.completed ? (
-                    <CheckSquare className="w-5 h-5 text-emerald-600" />
-                  ) : (
-                    <Square className="w-5 h-5 text-slate-400" />
-                  )}
+                  {item.completed ? <CheckSquare className="w-5 h-5 text-emerald-600" /> : <Square className="w-5 h-5 text-slate-300" />}
                 </div>
+
                 <div className="flex-1">
-                  <h4 className={`text-xs font-bold ${item.completed ? 'text-emerald-950 line-through opacity-80' : 'text-slate-900'}`}>
-                    {item.title}
-                  </h4>
-                  <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
-                    {item.description}
-                  </p>
+                  <div className="flex items-center justify-between">
+                    <h4 className={`text-sm font-bold ${item.completed ? 'line-through text-emerald-800' : 'text-slate-900'}`}>
+                      {item.title}
+                    </h4>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600 capitalize">
+                      {item.category.replace('_', ' ')}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">{item.description}</p>
                 </div>
               </div>
             ))}
