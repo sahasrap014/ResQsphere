@@ -1,0 +1,144 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+
+  /* Forest Green Palette */
+  --color-forest-950: #0a1b12;
+  --color-forest-900: #132e20;
+  --color-forest-850: #183827;
+  --color-forest-800: #1b4332;
+  --color-forest-700: #245740;
+  --color-forest-600: #2d6a4f;
+  --color-forest-500: #40916c;
+  --color-forest-400: #52b788;
+  --color-forest-300: #74c69d;
+  --color-forest-200: #95d5b2;
+  --color-forest-100: #d8f3dc;
+  --color-forest-50: #edfbf1;
+
+  /* Light Neutral Surface Palette */
+  --color-surface-bg: #f4f6f4;
+  --color-surface-card: #ffffff;
+  --color-surface-border: #e2e8e3;
+  --color-surface-muted: #f9fbf9;
+  --color-surface-hover: #eaf1ec;
+
+  /* Content Text Colors */
+  --color-text-main: #132e20;
+  --color-text-body: #2d3748;
+  --color-text-muted: #64748b;
+  --color-text-subtle: #94a3b8;
+
+  /* Priority / Emergency Accents */
+  --color-alert-critical: #dc2626;
+  --color-alert-high: #ea580c;
+  --color-alert-warning: #d97706;
+  --color-alert-success: #16a34a;
+  --color-alert-info: #0284c7;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  width: 100%;
+}
+
+body {
+  background-color: var(--color-surface-bg, #f4f6f4);
+  color: var(--color-text-body, #2d3748);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f2;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Leaflet Overrides for Crisp Green & Neutral Theme */
+.leaflet-container {
+  font-family: var(--font-sans) !important;
+  border-radius: 0.75rem;
+  z-index: 10 !important;
+}
+
+.leaflet-control-zoom {
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05) !important;
+  overflow: hidden;
+}
+
+.leaflet-control-zoom a {
+  background-color: #ffffff !important;
+  color: #1e3e2b !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+  width: 32px !important;
+  height: 32px !important;
+  line-height: 32px !important;
+}
+
+.leaflet-control-zoom a:hover {
+  background-color: #f8fafc !important;
+  color: #166534 !important;
+}
+
+.leaflet-popup-content-wrapper {
+  background: #ffffff !important;
+  color: #1f2937 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05) !important;
+  border: 1px solid #e2e8f0;
+  padding: 4px;
+}
+
+.leaflet-popup-tip {
+  background: #ffffff !important;
+}
+
+/* Pulse animation for active emergency marker */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 0.3;
+  }
+  100% {
+    transform: scale(0.95);
+    opacity: 0.8;
+  }
+}
+
+.pulse-marker {
+  position: relative;
+}
+.pulse-marker::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  right: -4px;
+  bottom: -4px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse-ring 2s infinite ease-in-out;
+  z-index: -1;
+}

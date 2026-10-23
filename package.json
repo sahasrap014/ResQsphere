@@ -1,0 +1,11 @@
+{
+  "name": "disastershield-platform",
+  "private": true,
+  "version": "1.0.0",
+  "description": "DisasterShield - Safer Communities Dashboard: India Disaster Preparedness & Relief Coordination Network",
+  "scripts": {
+    "dev": "npm --prefix \"drill demo\" run dev",
+    "build": "npm --prefix \"drill demo\" run build",
+    "preview": "npm --prefix \"drill demo\" run preview"
+  }
+}
