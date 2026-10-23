@@ -166,8 +166,8 @@ export interface AddShelterInput {
 export interface ResponseTeam {
   id: string;
   name: string;
-  agency: 'NDRF' | 'SDRF' | 'Fire & Rescue' | 'Medical Corps' | 'Civil Defence' | 'Police Quick Response';
-  type: 'flood_rescue' | 'medical' | 'boat_rescue' | 'logistics' | 'structural_search';
+  agency: string;
+  type: string;
   leader: string;
   contactPhone: string;
   membersCount: number;
@@ -178,7 +178,23 @@ export interface ResponseTeam {
   lat: number;
   lng: number;
   specialties: string[];
+  notes?: string;
   isDemo?: boolean;
+}
+
+export interface AddResponseTeamInput {
+  name: string;
+  agency?: string;
+  type: string;
+  leader?: string;
+  contactPhone?: string;
+  membersCount: number;
+  baseLocation: string;
+  status?: 'available' | 'deployed' | 'resting';
+  specialties?: string[];
+  lat?: number;
+  lng?: number;
+  notes?: string;
 }
 
 export interface ReliefResource {
@@ -303,5 +319,6 @@ export interface UserLocation {
   address?: string;
   district?: string;
   isDetected: boolean;
+  isManual?: boolean;
   permissionStatus: 'prompt' | 'granted' | 'denied' | 'unavailable';
 }

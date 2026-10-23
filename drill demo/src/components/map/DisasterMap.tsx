@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Circle, LayersControl } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Incident, Shelter } from '../../types/disaster';
-import { ShieldAlert, Home, Eye, MapPin } from 'lucide-react';
+import { Incident, Shelter, UserLocation } from '../../types/disaster';
+import { ShieldAlert, Home, Eye, MapPin, Navigation } from 'lucide-react';
 
 interface DisasterMapProps {
   incidents: Incident[];
@@ -14,7 +14,49 @@ interface DisasterMapProps {
   showShelters?: boolean;
   onSelectIncident?: (incident: Incident) => void;
   title?: string;
+  userLocation?: UserLocation;
+  isDemo?: boolean;
 }
+
+// Helper to keep Leaflet map centered when props or geolocation change
+const MapUpdater: React.FC<{ center: [number, number]; zoom: number }> = ({ center, zoom }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (center && center[0] !== undefined && center[1] !== undefined) {
+      map.setView(center, zoom, { animate: true });
+    }
+  }, [center[0], center[1], zoom, map]);
+  return null;
+};
+
+// Custom Marker for User's Active Location (GPS or Manual)
+const createUserLocationIcon = (isManual?: boolean) => {
+  const bg = isManual ? '#0284C7' : '#059669'; // Blue if manual, Emerald if GPS
+  return L.divIcon({
+    className: 'custom-user-location-marker',
+    html: `
+      <div style="
+        background-color: ${bg};
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        border: 3px solid #ffffff;
+        box-shadow: 0 0 0 4px ${isManual ? 'rgba(2, 132, 199, 0.35)' : 'rgba(5, 150, 105, 0.4)'}, 0 4px 6px -1px rgba(0,0,0,0.3);
+      ">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+        </svg>
+      </div>
+    `,
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+    popupAnchor: [0, -18],
+  });
+};
 
 // Custom Leaflet DivIcon Generators
 const createIncidentIcon = (severity: string, status: string) => {
@@ -90,13 +132,37 @@ export const DisasterMap: React.FC<DisasterMapProps> = ({
   incidents,
   shelters = [],
   height = '420px',
-  center = [16.9891, 81.784],
-  zoom = 12,
+  center,
+  zoom,
   showShelters = true,
   onSelectIncident,
   title = 'Live Incident & Safe Shelter Map',
+  userLocation,
+  isDemo = false,
 }) => {
   const [filter, setFilter] = useState<'all' | 'verified' | 'pending' | 'shelters'>('all');
+
+  // Dynamic Center & Zoom (Fix Requirement 1: no hardcoded AP coastal center)
+  const activeCenter: [number, number] = React.useMemo(() => {
+    if (center && center[0] && center[1]) return center;
+    if (userLocation && (userLocation.isDetected || userLocation.isManual)) {
+      return [userLocation.lat, userLocation.lng];
+    }
+    if (isDemo) {
+      return [16.9891, 81.784];
+    }
+    // Neutral pan-India overview when location not yet obtained
+    return [20.5937, 78.9629];
+  }, [center, userLocation?.lat, userLocation?.lng, userLocation?.isDetected, userLocation?.isManual, isDemo]);
+
+  const activeZoom = React.useMemo(() => {
+    if (zoom) return zoom;
+    if (userLocation && (userLocation.isDetected || userLocation.isManual)) {
+      return 12;
+    }
+    if (isDemo) return 12;
+    return 5; // India-wide zoom
+  }, [zoom, userLocation?.isDetected, userLocation?.isManual, isDemo]);
 
   const filteredIncidents = incidents.filter((inc) => {
     if (filter === 'verified') return inc.status === 'verified' || inc.status === 'dispatched' || inc.status === 'in_progress';
@@ -114,6 +180,11 @@ export const DisasterMap: React.FC<DisasterMapProps> = ({
           <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-slate-200/80 text-slate-700">
             {filteredIncidents.length} Incidents {showShelters ? `· ${shelters.length} Shelters` : ''}
           </span>
+          {userLocation?.isDetected && (
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center gap-1">
+              <Navigation className="w-2.5 h-2.5" /> GPS Locked
+            </span>
+          )}
         </div>
 
         {/* Filter buttons */}
@@ -148,28 +219,55 @@ export const DisasterMap: React.FC<DisasterMapProps> = ({
       {/* Map Body */}
       <div style={{ height, width: '100%' }} className="relative z-10">
         <MapContainer
-          center={center}
-          zoom={zoom}
+          center={activeCenter}
+          zoom={activeZoom}
           scrollWheelZoom={false}
           style={{ height: '100%', width: '100%' }}
         >
+          <MapUpdater center={activeCenter} zoom={activeZoom} />
+
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {/* Low lying flood inundation simulation buffer ring */}
-          <Circle
-            center={[16.985, 81.775]}
-            radius={2800}
-            pathOptions={{
-              color: '#38BDF8',
-              fillColor: '#38BDF8',
-              fillOpacity: 0.12,
-              weight: 1.5,
-              dashArray: '4, 6',
-            }}
-          />
+          {/* User Location Marker (GPS or Manual) */}
+          {userLocation && (userLocation.isDetected || userLocation.isManual) && (
+            <Marker
+              position={[userLocation.lat, userLocation.lng]}
+              icon={createUserLocationIcon(userLocation.isManual)}
+            >
+              <Popup>
+                <div className="p-1 space-y-1 min-w-[200px] text-xs">
+                  <div className="flex items-center gap-1.5 font-bold text-emerald-900">
+                    <Navigation className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>{userLocation.isDetected ? 'Current Device Location (GPS)' : 'Manually Selected Zone'}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-700">
+                    {userLocation.address || userLocation.district || 'Selected Sector'}
+                  </p>
+                  <div className="text-[10px] font-mono text-slate-500 pt-1 border-t border-slate-100">
+                    Coordinates: {userLocation.lat.toFixed(4)}° N, {userLocation.lng.toFixed(4)}° E
+                  </div>
+                </div>
+              </Popup>
+            </Marker>
+          )}
+
+          {/* Demo-only low lying flood inundation simulation buffer ring */}
+          {isDemo && (
+            <Circle
+              center={[16.985, 81.775]}
+              radius={2800}
+              pathOptions={{
+                color: '#38BDF8',
+                fillColor: '#38BDF8',
+                fillOpacity: 0.12,
+                weight: 1.5,
+                dashArray: '4, 6',
+              }}
+            />
+          )}
 
           {/* Incident Markers */}
           {filteredIncidents.map((inc) => (
@@ -316,9 +414,19 @@ export const DisasterMap: React.FC<DisasterMapProps> = ({
               Relief Shelter
             </span>
           )}
+          {userLocation && (userLocation.isDetected || userLocation.isManual) && (
+            <span className="flex items-center gap-1.5 font-semibold text-emerald-800">
+              <span className="w-3 h-3 rounded-full bg-emerald-600 border border-white shadow-xs inline-block" />
+              Your Location
+            </span>
+          )}
         </div>
-        <div className="text-[10px] text-slate-500">
-          GIS Coordinates: 16.98° N, 81.78° E · East Godavari Delta Basin
+        <div className="text-[10px] text-slate-500 font-mono">
+          {userLocation && (userLocation.isDetected || userLocation.isManual)
+            ? `Active Coordinates: ${activeCenter[0].toFixed(4)}° N, ${activeCenter[1].toFixed(4)}° E · ${userLocation.district || 'Local Sector'}`
+            : isDemo
+            ? 'Demo Simulation Sector: 16.98° N, 81.78° E · East Godavari Delta Basin'
+            : `Map Center: ${activeCenter[0].toFixed(2)}° N, ${activeCenter[1].toFixed(2)}° E (Select location or sign in for local GPS)`}
         </div>
       </div>
     </div>

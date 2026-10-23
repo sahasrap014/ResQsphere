@@ -50,12 +50,17 @@ export const AuthorityPortal: React.FC = () => {
     assignTeamToIncident,
     updateShelterOccupancy,
     addShelter,
+    addResponseTeam,
+    canAccessPortal,
     linkDuplicateToPrimary,
     keepIncidentDistinct,
     matchAndAllocateResource,
     mode,
     resetScenario,
     user,
+    logout,
+    openAuthForRole,
+    userLocation,
   } = useDisaster();
 
   // Selected incident for detail / assignment modal
@@ -63,6 +68,21 @@ export const AuthorityPortal: React.FC = () => {
   const [assignModalIncident, setAssignModalIncident] = useState<Incident | null>(null);
   const [selectedTeamId, setSelectedTeamId] = useState<string>('');
   const [assignError, setAssignError] = useState<string | null>(null);
+
+  // Response Team form state (Add Response Team feature)
+  const [isAddTeamOpen, setIsAddTeamOpen] = useState(false);
+  const [teamName, setTeamName] = useState('');
+  const [teamAgency, setTeamAgency] = useState('SDRF');
+  const [teamType, setTeamType] = useState('Search & Rescue (USAR)');
+  const [teamLeader, setTeamLeader] = useState('');
+  const [teamPhone, setTeamPhone] = useState('');
+  const [teamMembersCount, setTeamMembersCount] = useState<number>(12);
+  const [teamBaseLocation, setTeamBaseLocation] = useState('');
+  const [teamStatus, setTeamStatus] = useState<'available' | 'deployed' | 'resting'>('available');
+  const [teamSpecialties, setTeamSpecialties] = useState('');
+  const [teamNotes, setTeamNotes] = useState('');
+  const [teamFormError, setTeamFormError] = useState<string | null>(null);
+  const [teamFormSuccess, setTeamFormSuccess] = useState<string | null>(null);
 
   // Shelter state
   const [isAddShelterOpen, setIsAddShelterOpen] = useState(false);
@@ -225,6 +245,94 @@ export const AuthorityPortal: React.FC = () => {
     }, 1400);
   };
 
+  const handleAddTeamSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setTeamFormError(null);
+    setTeamFormSuccess(null);
+
+    const result = addResponseTeam({
+      name: teamName,
+      agency: teamAgency,
+      type: teamType,
+      leader: teamLeader || 'Team Commander',
+      contactPhone: teamPhone,
+      membersCount: teamMembersCount,
+      baseLocation: teamBaseLocation,
+      status: teamStatus,
+      specialties: teamSpecialties.split(',').map((s) => s.trim()).filter(Boolean),
+      notes: teamNotes,
+    });
+
+    if (!result.success) {
+      setTeamFormError(result.error || 'Failed to add response team.');
+      return;
+    }
+
+    setTeamFormSuccess(`Response team "${teamName}" registered successfully! Available for mission dispatch.`);
+    setTeamName('');
+    setTeamLeader('');
+    setTeamPhone('');
+    setTeamBaseLocation('');
+    setTeamSpecialties('');
+    setTeamNotes('');
+    setTimeout(() => {
+      setTeamFormSuccess(null);
+      setIsAddTeamOpen(false);
+    }, 1500);
+  };
+
+  // Section 3: Enforce strict role authorization
+  const accessCheck = canAccessPortal('authority');
+  if (!accessCheck.allowed) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-16 text-center space-y-6">
+        <div className="h-16 w-16 mx-auto rounded-3xl bg-amber-50 border border-amber-200 text-amber-700 flex items-center justify-center">
+          <ShieldAlert className="w-8 h-8" />
+        </div>
+        <div className="space-y-2">
+          <h1 className="text-2xl font-black text-slate-900">Access Restricted</h1>
+          <p className="text-sm text-slate-600 max-w-lg mx-auto leading-relaxed">
+            {accessCheck.reason === 'citizen_denied'
+              ? 'You are signed in as a Citizen and do not have permission to access the Authority/Responder portal. Please sign in with an authorized account.'
+              : accessCheck.reason === 'partner_denied'
+              ? 'You are signed in as a Relief Partner and do not have permission to access the Authority/Responder portal. Please sign in with an authorized account.'
+              : accessCheck.reason === 'pending_approval'
+              ? 'Your Authority account is currently pending administrator verification. Please contact state disaster command.'
+              : 'The Authority Command Center is restricted to verified emergency personnel. Please sign in with an authorized Authority / Responder account.'}
+          </p>
+        </div>
+        <div className="flex items-center justify-center gap-3 pt-2">
+          {user ? (
+            <>
+              <button
+                onClick={logout}
+                className="px-4 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100 transition"
+              >
+                Sign Out
+              </button>
+              <button
+                onClick={() => {
+                  logout();
+                  openAuthForRole('authority');
+                }}
+                className="px-4 py-2 bg-[#1B4332] text-white rounded-xl text-xs font-bold hover:bg-[#245740] transition"
+              >
+                Sign In with Authorized Account
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => openAuthForRole('authority')}
+              className="px-5 py-2.5 bg-[#1B4332] text-white rounded-xl text-xs font-bold hover:bg-[#245740] transition"
+            >
+              Sign In as Authority / Responder
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 pb-16 max-w-7xl mx-auto px-4 sm:px-6 pt-6">
       {/* Authority Portal Header */}
@@ -386,6 +494,8 @@ export const AuthorityPortal: React.FC = () => {
               height="440px"
               title="Tactical Command Incident Map"
               onSelectIncident={(inc) => setSelectedIncident(inc)}
+              userLocation={userLocation}
+              isDemo={mode === 'demo'}
             />
           </section>
 
@@ -784,6 +894,19 @@ export const AuthorityPortal: React.FC = () => {
                   {stats.activeResponseTeams} active deployments | {responseTeams.length} total disaster rescue units
                 </p>
               </div>
+
+              {/* Add Response Team Action */}
+              <button
+                onClick={() => {
+                  setTeamFormError(null);
+                  setTeamFormSuccess(null);
+                  setIsAddTeamOpen(true);
+                }}
+                className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Response Team</span>
+              </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -1414,6 +1537,190 @@ export const AuthorityPortal: React.FC = () => {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: ADD RESPONSE TEAM */}
+      {isAddTeamOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 p-6 relative my-8">
+            <button
+              onClick={() => setIsAddTeamOpen(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 p-1 rounded-full"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-2.5 mb-1">
+              <div className="h-8 w-8 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                <Truck className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-slate-900">Add Emergency Response Team</h3>
+                <p className="text-xs text-slate-500">Register new disaster rescue unit to active operational command</p>
+              </div>
+            </div>
+
+            {teamFormError && (
+              <div className="my-3 p-3 bg-red-50 border border-red-200 text-red-800 rounded-xl text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                <span>{teamFormError}</span>
+              </div>
+            )}
+
+            {teamFormSuccess && (
+              <div className="my-3 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{teamFormSuccess}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleAddTeamSubmit} className="space-y-3.5 text-xs mt-3">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Team Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. SDRF Water Rescue Unit 04"
+                  value={teamName}
+                  onChange={(e) => setTeamName(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-700"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Agency / Service</label>
+                  <select
+                    value={teamAgency}
+                    onChange={(e) => setTeamAgency(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 text-xs bg-white"
+                  >
+                    <option value="SDRF">SDRF (State Disaster Response)</option>
+                    <option value="NDRF">NDRF (National Disaster Response)</option>
+                    <option value="Fire & Rescue">Fire & Emergency Services</option>
+                    <option value="Medical Corps">Emergency Medical Services</option>
+                    <option value="Civil Defence">Civil Defence Volunteers</option>
+                    <option value="Police Quick Response">Police Rapid Action Force</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Specialization / Role</label>
+                  <select
+                    value={teamType}
+                    onChange={(e) => setTeamType(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 text-xs bg-white"
+                  >
+                    <option value="Search & Rescue (USAR)">Search & Rescue (USAR)</option>
+                    <option value="Boat & Flood Evacuation">Boat & Flood Evacuation</option>
+                    <option value="Emergency Medical Trauma">Emergency Medical Trauma</option>
+                    <option value="Logistics & Food Distribution">Logistics & Food Distribution</option>
+                    <option value="Firefighting & Hazmat">Firefighting & Hazmat</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Team Leader / Officer</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Insp. Rajesh Sharma"
+                    value={teamLeader}
+                    onChange={(e) => setTeamLeader(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 text-xs bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Contact Phone (+91) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="+91 98490 12345"
+                    value={teamPhone}
+                    onChange={(e) => setTeamPhone(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 text-xs bg-white font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Crew Size (Members) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={teamMembersCount}
+                    onChange={(e) => setTeamMembersCount(parseInt(e.target.value) || 1)}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 text-xs bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Initial Status</label>
+                  <select
+                    value={teamStatus}
+                    onChange={(e) => setTeamStatus(e.target.value as any)}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 text-xs bg-white"
+                  >
+                    <option value="available">Available (Ready for Dispatch)</option>
+                    <option value="deployed">Deployed</option>
+                    <option value="resting">Resting / Standby</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Operational Base / Staging Post <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Kovvur Barrage Staging Area"
+                  value={teamBaseLocation}
+                  onChange={(e) => setTeamBaseLocation(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Specialties & Equipment</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Gemini Inflatable Boats, SCUBA, First Aid"
+                  value={teamSpecialties}
+                  onChange={(e) => setTeamSpecialties(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs bg-white"
+                />
+              </div>
+
+              <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsAddTeamOpen(false)}
+                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-5 py-2 rounded-xl shadow-xs transition"
+                >
+                  Save Response Team
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

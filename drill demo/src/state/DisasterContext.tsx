@@ -5,6 +5,7 @@ import {
   Shelter,
   AddShelterInput,
   ResponseTeam,
+  AddResponseTeamInput,
   ReliefResource,
   ResourceAllocation,
   Volunteer,
@@ -104,7 +105,12 @@ interface DisasterContextType {
   assignTeamToIncident: (incidentId: string, teamId: string) => { success: boolean; error?: string };
   
   submitAssistanceRequest: (req: Omit<AssistanceRequest, 'id' | 'requestedAt' | 'status'>) => AssistanceRequest;
-  fulfillAssistanceRequest: (requestId: string, partnerName: string, resourceId?: string) => void;
+  fulfillAssistanceRequest: (
+    requestId: string,
+    partnerName: string,
+    resourceId?: string,
+    quantity?: number
+  ) => Promise<{ success: boolean; error?: string; allocated?: number; remainingResource?: number }>;
   
   // Requirement 9: Real Match Resources workflow
   matchAndAllocateResource: (
@@ -117,6 +123,15 @@ interface DisasterContextType {
   // Requirement 6: Add Shelter functionality with strict capacity validation
   addShelter: (input: AddShelterInput) => { success: boolean; error?: string; shelter?: Shelter };
   updateShelterOccupancy: (shelterId: string, newOccupancy: number) => { success: boolean; error?: string };
+
+  // Response Teams: Add Response Team functionality
+  addResponseTeam: (input: AddResponseTeamInput) => { success: boolean; error?: string; team?: ResponseTeam };
+
+  // Role-based portal access verification
+  canAccessPortal: (portal: PortalType) => {
+    allowed: boolean;
+    reason?: 'unauthenticated' | 'citizen_denied' | 'partner_denied' | 'authority_denied' | 'pending_approval';
+  };
 
   registerResource: (res: Omit<ReliefResource, 'id' | 'registeredAt' | 'status'>) => ReliefResource;
   registerVolunteer: (vol: Omit<Volunteer, 'id' | 'registeredAt' | 'status'>) => Volunteer;
@@ -145,18 +160,19 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [citizenAction, setCitizenAction] = useState<CitizenAction>('main');
   const [partnerSection, setPartnerSection] = useState<PartnerSection>('main');
 
-  // Location State (Requirement 2)
+  // Location State (Requirement 2 & Section 1: No fake AP default in Live Mode)
   const [userLocation, setUserLocation] = useState<UserLocation>(() => {
     try {
       const saved = localStorage.getItem('resqsphere_user_location');
       if (saved) return JSON.parse(saved);
     } catch {}
     return {
-      lat: 16.9891,
-      lng: 81.784,
-      address: 'East Godavari Simulation Sector, AP',
-      district: 'East Godavari',
+      lat: 20.5937,
+      lng: 78.9629,
+      address: undefined,
+      district: undefined,
       isDetected: false,
+      isManual: false,
       permissionStatus: 'prompt',
     };
   });
@@ -292,8 +308,13 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setSupabaseStatus(res);
   };
 
-  // Device Geolocation Request (Requirement 2)
+  // Geolocation Request (Section 1: Live mode requires sign-in first)
   const requestDeviceLocation = async () => {
+    if (mode === 'live' && !user) {
+      console.warn('In Live Mode, geolocation request is blocked before user authentication.');
+      return;
+    }
+
     if (!navigator.geolocation) {
       setUserLocation((prev) => ({
         ...prev,
@@ -308,14 +329,15 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           (pos) => {
             const lat = Number(pos.coords.latitude.toFixed(4));
             const lng = Number(pos.coords.longitude.toFixed(4));
-            const detectedArea = `Detected Coordinates (${lat}°N, ${lng}°E)`;
+            const detectedArea = `GPS Coordinates (${lat}°N, ${lng}°E)`;
 
             const updatedLoc: UserLocation = {
               lat,
               lng,
               address: detectedArea,
-              district: 'Current Local Zone',
+              district: 'Current Device Location (GPS)',
               isDetected: true,
+              isManual: false,
               permissionStatus: 'granted',
             };
 
@@ -366,6 +388,7 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       district,
       address: address || `${district} Zone`,
       isDetected: false,
+      isManual: true,
       permissionStatus: 'granted',
     };
     setUserLocation(loc);
@@ -808,55 +831,300 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const fulfillAssistanceRequest = (requestId: string, partnerName: string, resourceId?: string) => {
-    const requestUpdater = (prev: AssistanceRequest[]) =>
-      prev.map((req) =>
-        req.id === requestId
-          ? {
-              ...req,
-              status: 'fulfilled' as const,
-              fulfilledBy: partnerName,
-              fulfilledAt: new Date().toISOString(),
-              allocatedResourceId: resourceId,
-              quantityFulfilled: req.quantityRequested || 1,
-              remainingQuantity: 0,
-            }
-          : req
-      );
+  // Section 2: Precise and atomic resource deduction workflow
+  const fulfillAssistanceRequest = async (
+    requestId: string,
+    partnerName: string,
+    resourceId?: string,
+    quantity?: number
+  ): Promise<{ success: boolean; error?: string; allocated?: number; remainingResource?: number }> => {
+    // 1. Locate the request
+    const currentRequests = mode === 'demo' ? demoRequests : liveRequests;
+    const targetReq = currentRequests.find((r) => r.id === requestId);
+    if (!targetReq) {
+      return { success: false, error: 'Assistance request not found.' };
+    }
 
-    const resourceUpdater = (prev: ReliefResource[]) =>
-      prev.map((res) => {
-        if (resourceId && res.id === resourceId) {
-          const newQty = Math.max(0, res.quantity - 1);
-          return {
-            ...res,
-            quantity: newQty,
-            status: newQty === 0 ? ('allocated' as const) : ('available' as const),
-          };
-        }
-        return res;
-      });
+    // 2. Locate the matching resource
+    const currentResources = mode === 'demo' ? demoResources : liveResources;
+    let targetRes = resourceId
+      ? currentResources.find((r) => r.id === resourceId)
+      : currentResources.find((r) => r.category === targetReq.category && r.quantity > 0);
+
+    if (!targetRes) {
+      return {
+        success: false,
+        error: `No compatible ${targetReq.category} inventory supplies available in stock to fulfill this request.`,
+      };
+    }
+
+    // 3. Determine quantity to commit & fulfill
+    const remainingNeed = targetReq.remainingQuantity ?? targetReq.quantityRequested ?? 1;
+    const qtyToAllocate = quantity && quantity > 0 ? quantity : remainingNeed;
+
+    // Strict Validations
+    if (!Number.isInteger(qtyToAllocate) || qtyToAllocate <= 0) {
+      return { success: false, error: 'Allocation quantity must be a positive whole number greater than 0.' };
+    }
+
+    if (qtyToAllocate > targetRes.quantity) {
+      return {
+        success: false,
+        error: `Insufficient stock: only ${targetRes.quantity} ${targetRes.unit} available, but attempted to commit ${qtyToAllocate} ${targetRes.unit}.`,
+      };
+    }
+
+    if (qtyToAllocate > remainingNeed) {
+      return {
+        success: false,
+        error: `Over-allocation rejected: attempted to commit ${qtyToAllocate} ${targetRes.unit}, but remaining need is only ${remainingNeed} ${targetRes.unit}.`,
+      };
+    }
+
+    // Exact inventory deduction
+    const newResQty = targetRes.quantity - qtyToAllocate;
+    const newResStatus = newResQty === 0 ? ('allocated' as const) : ('available' as const);
+    const newFulfilled = (targetReq.quantityFulfilled || 0) + qtyToAllocate;
+    const newRemaining = Math.max(0, (targetReq.quantityRequested || remainingNeed) - newFulfilled);
+    const newStatus = newRemaining === 0 ? ('fulfilled' as const) : ('partially_fulfilled' as const);
+
+    const allocId = `ALC-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+    const newAllocation: ResourceAllocation = {
+      id: allocId,
+      requestId,
+      resourceId: targetRes.id,
+      resourceName: targetRes.itemName,
+      category: targetRes.category,
+      allocatedQuantity: qtyToAllocate,
+      unit: targetRes.unit,
+      allocatedBy: partnerName,
+      allocatedAt: new Date().toISOString(),
+      isDemo: mode === 'demo',
+    };
 
     if (mode === 'demo') {
-      setDemoRequests(requestUpdater);
-      setDemoResources(resourceUpdater);
+      setDemoRequests((prev) =>
+        prev.map((r) =>
+          r.id === requestId
+            ? {
+                ...r,
+                quantityFulfilled: newFulfilled,
+                remainingQuantity: newRemaining,
+                status: newStatus,
+                fulfilledBy: partnerName,
+                fulfilledAt: new Date().toISOString(),
+                allocatedResourceId: targetRes!.id,
+              }
+            : r
+        )
+      );
+
+      setDemoResources((prev) =>
+        prev.map((res) =>
+          res.id === targetRes!.id
+            ? {
+                ...res,
+                quantity: newResQty,
+                status: newResStatus,
+              }
+            : res
+        )
+      );
+
+      setDemoAllocations((prev) => [newAllocation, ...prev]);
+      return { success: true, allocated: qtyToAllocate, remainingResource: newResQty };
     } else {
-      setLiveRequests(requestUpdater);
-      setLiveResources(resourceUpdater);
+      // Live Mode: Atomic RPC or direct Supabase update
+      if (supabase && isSupabaseConfigured) {
+        try {
+          const { error } = await supabase.rpc('allocate_relief_resource', {
+            p_request_id: requestId,
+            p_resource_id: targetRes.id,
+            p_quantity: qtyToAllocate,
+            p_allocated_by: partnerName,
+          });
+
+          if (error) {
+            console.warn('RPC allocate_relief_resource fallback:', error.message);
+            await supabase.from('relief_resources').update({ quantity: newResQty, status: newResStatus }).eq('id', targetRes.id);
+            await supabase
+              .from('assistance_requests')
+              .update({
+                quantity_fulfilled: newFulfilled,
+                remaining_quantity: newRemaining,
+                status: newStatus,
+                fulfilled_by: partnerName,
+                fulfilled_at: new Date().toISOString(),
+                allocated_resource_id: targetRes.id,
+              })
+              .eq('id', requestId);
+            await supabase.from('allocations').insert([
+              {
+                id: allocId,
+                request_id: requestId,
+                resource_id: targetRes.id,
+                allocated_quantity: qtyToAllocate,
+                unit: targetRes.unit,
+                allocated_by: partnerName,
+              },
+            ]);
+          }
+        } catch (dbErr: any) {
+          return { success: false, error: dbErr?.message || 'Database allocation failed.' };
+        }
+      }
+
+      setLiveRequests((prev) =>
+        prev.map((r) =>
+          r.id === requestId
+            ? {
+                ...r,
+                quantityFulfilled: newFulfilled,
+                remainingQuantity: newRemaining,
+                status: newStatus,
+                fulfilledBy: partnerName,
+                fulfilledAt: new Date().toISOString(),
+                allocatedResourceId: targetRes!.id,
+              }
+            : r
+        )
+      );
+
+      setLiveResources((prev) =>
+        prev.map((res) =>
+          res.id === targetRes!.id
+            ? {
+                ...res,
+                quantity: newResQty,
+                status: newResStatus,
+              }
+            : res
+        )
+      );
+
+      setLiveAllocations((prev) => [newAllocation, ...prev]);
+      return { success: true, allocated: qtyToAllocate, remainingResource: newResQty };
+    }
+  };
+
+  // Add Response Team Functionality
+  const addResponseTeam = (
+    input: AddResponseTeamInput
+  ): { success: boolean; error?: string; team?: ResponseTeam } => {
+    if (!input.name || input.name.trim().length === 0) {
+      return { success: false, error: 'Response team name is required.' };
+    }
+
+    if (!Number.isInteger(input.membersCount) || input.membersCount <= 0) {
+      return { success: false, error: 'Team size must be a positive whole number (at least 1 crew member).' };
+    }
+
+    if (!input.baseLocation || input.baseLocation.trim().length === 0) {
+      return { success: false, error: 'Operational base or staging location is required.' };
+    }
+
+    let phoneNormalized = '+91 98000 00000';
+    if (input.contactPhone) {
+      const phoneVal = validateIndianMobile(input.contactPhone);
+      if (!phoneVal.isValid) {
+        return { success: false, error: phoneVal.error || 'Enter a valid 10-digit Indian mobile number for team contact.' };
+      }
+      phoneNormalized = phoneVal.normalized;
+    }
+
+    // Check duplicate team name
+    const currentTeams = mode === 'demo' ? demoTeams : liveTeams;
+    if (currentTeams.some((t) => t.name.toLowerCase() === input.name.trim().toLowerCase())) {
+      return { success: false, error: `A response team named "${input.name.trim()}" already exists in the registry.` };
+    }
+
+    const id = `TEAM-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
+    const newTeam: ResponseTeam = {
+      id,
+      name: input.name.trim(),
+      agency: input.agency || 'SDRF',
+      type: input.type || 'Search & Rescue',
+      leader: input.leader || 'Team Commander',
+      contactPhone: phoneNormalized,
+      membersCount: input.membersCount,
+      status: input.status || 'available',
+      baseLocation: input.baseLocation.trim(),
+      lat: input.lat || (mode === 'demo' ? 16.989 : userLocation.lat),
+      lng: input.lng || (mode === 'demo' ? 81.784 : userLocation.lng),
+      specialties: input.specialties || ['Emergency Search', 'First Aid'],
+      notes: input.notes,
+      isDemo: mode === 'demo',
+    };
+
+    if (mode === 'demo') {
+      setDemoTeams((prev) => [newTeam, ...prev]);
+    } else {
+      setLiveTeams((prev) => [newTeam, ...prev]);
       if (supabase && isSupabaseConfigured) {
         Promise.resolve(
-          supabase
-            .from('assistance_requests')
-            .update({
-              status: 'fulfilled',
-              fulfilled_by: partnerName,
-              fulfilled_at: new Date().toISOString(),
-              remaining_quantity: 0,
-            })
-            .eq('id', requestId)
-        ).catch(() => {});
+          supabase.from('response_teams').insert([
+            {
+              id: newTeam.id,
+              name: newTeam.name,
+              agency: newTeam.agency,
+              type: newTeam.type,
+              leader: newTeam.leader,
+              contact_phone: newTeam.contactPhone,
+              members_count: newTeam.membersCount,
+              status: newTeam.status,
+              base_location: newTeam.baseLocation,
+              lat: newTeam.lat,
+              lng: newTeam.lng,
+              specialties: newTeam.specialties,
+            },
+          ])
+        ).catch((err: any) => {
+          console.warn('Failed to insert response team to Supabase:', err);
+        });
       }
     }
+
+    return { success: true, team: newTeam };
+  };
+
+  // Section 3: Role-based portal access verification
+  const canAccessPortal = (
+    portal: PortalType
+  ): {
+    allowed: boolean;
+    reason?: 'unauthenticated' | 'citizen_denied' | 'partner_denied' | 'authority_denied' | 'pending_approval';
+  } => {
+    if (mode === 'demo') {
+      return { allowed: true };
+    }
+
+    if (portal === 'home' || portal === 'citizen') {
+      return { allowed: true };
+    }
+
+    if (portal === 'authority') {
+      if (!user) return { allowed: false, reason: 'unauthenticated' };
+      if (user.role === 'citizen') return { allowed: false, reason: 'citizen_denied' };
+      if (user.role === 'partner') return { allowed: false, reason: 'partner_denied' };
+      if (user.role === 'authority') {
+        if (user.isApproved === false) return { allowed: false, reason: 'pending_approval' };
+        return { allowed: true };
+      }
+      return { allowed: false, reason: 'citizen_denied' };
+    }
+
+    if (portal === 'partner') {
+      if (!user) return { allowed: false, reason: 'unauthenticated' };
+      if (user.role === 'citizen') return { allowed: false, reason: 'citizen_denied' };
+      if (user.role === 'partner') {
+        if (user.isApproved === false) return { allowed: false, reason: 'pending_approval' };
+        return { allowed: true };
+      }
+      if (user.role === 'authority') return { allowed: true };
+      return { allowed: false, reason: 'citizen_denied' };
+    }
+
+    return { allowed: true };
   };
 
   // Requirement 6: Add Shelter functionality with strict capacity validation
@@ -1283,6 +1551,8 @@ export const DisasterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         matchAndAllocateResource,
         addShelter,
         updateShelterOccupancy,
+        addResponseTeam,
+        canAccessPortal,
         registerResource,
         registerVolunteer,
         registerVehicle,

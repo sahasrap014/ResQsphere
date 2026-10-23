@@ -30,13 +30,15 @@ export const HomePortal: React.FC = () => {
     setIsEmergencyCallModalOpen,
     mode,
     setMode,
+    user,
+    openAuthForRole,
     userLocation,
     requestDeviceLocation,
     setManualLocation,
   } = useDisaster();
 
   const [isManualLocationOpen, setIsManualLocationOpen] = useState(false);
-  const [selectedCity, setSelectedCity] = useState(userLocation.district || 'East Godavari');
+  const [selectedCity, setSelectedCity] = useState(userLocation.district || 'Select District');
 
   // Filter verified incidents for public map view (do not expose unverified or private citizen info)
   const publicVerifiedIncidents = incidents.filter(
@@ -58,12 +60,12 @@ export const HomePortal: React.FC = () => {
 
   return (
     <div className="space-y-6 pb-16 max-w-7xl mx-auto px-4 sm:px-6 pt-6">
-      {/* Requirement 2: Device Location Permission & Awareness Banner in Live Mode */}
+      {/* Section 1: Device Location Permission & Awareness Banner in Live Mode */}
       {mode === 'live' && (
         <div className="bg-white rounded-2xl border border-emerald-200/90 p-4 shadow-xs flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-3">
             <div className={`h-8 w-8 rounded-xl flex items-center justify-center shrink-0 ${
-              userLocation.isDetected ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
+              userLocation.isDetected ? 'bg-emerald-100 text-emerald-800' : userLocation.isManual ? 'bg-sky-100 text-sky-800' : 'bg-slate-100 text-slate-700'
             }`}>
               <MapPin className="w-4 h-4" />
             </div>
@@ -71,28 +73,48 @@ export const HomePortal: React.FC = () => {
               <div className="font-bold text-slate-900 flex items-center gap-2">
                 <span>Location Context:</span>
                 <span className="font-semibold text-emerald-800 font-mono">
-                  {userLocation.address || userLocation.district || 'East Godavari Simulation Sector'}
+                  {userLocation.address || userLocation.district || 'Location unavailable — select a location manually'}
                 </span>
-                {userLocation.isDetected && (
-                  <span className="bg-emerald-100 text-emerald-800 text-[10px] px-1.5 py-0.2 rounded-full font-semibold">
-                    GPS Active
+                {userLocation.isDetected ? (
+                  <span className="bg-emerald-100 text-emerald-800 text-[10px] px-2 py-0.5 rounded-full font-semibold flex items-center gap-1">
+                    <Navigation className="w-2.5 h-2.5" /> GPS Active
+                  </span>
+                ) : userLocation.isManual ? (
+                  <span className="bg-sky-100 text-sky-800 text-[10px] px-2 py-0.5 rounded-full font-semibold">
+                    Manual Selection
+                  </span>
+                ) : (
+                  <span className="bg-amber-100 text-amber-800 text-[10px] px-2 py-0.5 rounded-full font-semibold">
+                    Awaiting Selection
                   </span>
                 )}
               </div>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                ResQsphere determines local weather, active flood risk, and nearest relief shelters for your immediate coordinates.
+                {userLocation.isDetected || userLocation.isManual
+                  ? 'Real-time telemetry and map centering active for your selected geographical coordinates.'
+                  : 'Live Mode requests device GPS only after sign-in. You may also pick any district manually below.'}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {!userLocation.isDetected && (
+            {/* Geolocation only available after sign-in */}
+            {user ? (
+              !userLocation.isDetected && (
+                <button
+                  onClick={() => requestDeviceLocation()}
+                  className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 text-xs shadow-xs"
+                >
+                  <Navigation className="w-3.5 h-3.5" />
+                  <span>Detect My Location</span>
+                </button>
+              )
+            ) : (
               <button
-                onClick={() => requestDeviceLocation()}
+                onClick={() => openAuthForRole('citizen')}
                 className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 text-xs shadow-xs"
               >
-                <Navigation className="w-3.5 h-3.5" />
-                <span>Use Current Location</span>
+                <span>Sign In for Live GPS</span>
               </button>
             )}
 
@@ -100,7 +122,7 @@ export const HomePortal: React.FC = () => {
               onClick={() => setIsManualLocationOpen(!isManualLocationOpen)}
               className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium px-3 py-1.5 rounded-xl transition text-xs border border-slate-200"
             >
-              Select District Manually
+              {userLocation.isManual || userLocation.isDetected ? 'Change District' : 'Select District Manually'}
             </button>
           </div>
         </div>
@@ -358,6 +380,8 @@ export const HomePortal: React.FC = () => {
           shelters={shelters}
           height="450px"
           title="Verified Community Incidents & Safe Shelter Network"
+          userLocation={userLocation}
+          isDemo={mode === 'demo'}
         />
       </section>
 

@@ -45,6 +45,8 @@ export const CitizenPortal: React.FC = () => {
     submitDamageReport,
     user,
     setIsAuthModalOpen,
+    mode,
+    userLocation,
   } = useDisaster();
 
   // Active form feedback & validation errors
@@ -81,21 +83,14 @@ export const CitizenPortal: React.FC = () => {
   const [damageDesc, setDamageDesc] = useState('');
   const [damagePhone, setDamagePhone] = useState(user?.phone || '');
 
-  // Privacy-filtered Citizen submissions
-  const myEmergencyReports = incidents.filter(
-    (inc) =>
-      (user && inc.reportedBy?.toLowerCase().includes(user.fullName?.toLowerCase())) ||
-      inc.reportedBy?.includes('Citizen') ||
-      inc.reportedPhone === '+91 97011 88321' ||
-      inc.isDemo
-  );
+  // Privacy-filtered Citizen submissions (Section 5: Persistent per Citizen)
+  const myEmergencyReports = mode === 'demo'
+    ? incidents.filter((inc) => inc.isDemo)
+    : incidents.filter((inc) => user && (inc.reportedBy?.toLowerCase().includes(user.fullName?.toLowerCase()) || (inc as any).citizen_id === user.id));
 
-  const myAssistanceRequests = assistanceRequests.filter(
-    (req) =>
-      (user && req.citizenId === user.id) ||
-      req.citizenId?.startsWith('CIT-DEMO') ||
-      req.citizenName?.includes('Ramana')
-  );
+  const myAssistanceRequests = mode === 'demo'
+    ? assistanceRequests.filter((req) => req.isDemo)
+    : assistanceRequests.filter((req) => user && (req.citizenId === user.id || (req as any).citizen_id === user.id));
 
   const myDamageReports = damageReports;
 

@@ -31,11 +31,24 @@ export const ReliefPartnerPortal: React.FC = () => {
     registerVolunteer,
     registerVehicle,
     fulfillAssistanceRequest,
+    canAccessPortal,
+    logout,
+    openAuthForRole,
+    mode,
     user,
   } = useDisaster();
 
   const [successFeedback, setSuccessFeedback] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [committingId, setCommittingId] = useState<string | null>(null);
+  const [allocationFeedback, setAllocationFeedback] = useState<{
+    resourceName: string;
+    previousQty: number;
+    allocatedQty: number;
+    remainingQty: number;
+    unit: string;
+    requestId: string;
+  } | null>(null);
 
   // Form states:
   // 1. Register Resource Form
@@ -162,11 +175,107 @@ export const ReliefPartnerPortal: React.FC = () => {
     }, 1500);
   };
 
-  const handleCommitResource = (requestId: string, resourceId?: string) => {
-    fulfillAssistanceRequest(requestId, partnerName, resourceId);
-    setSuccessFeedback('Committed & Dispatched! Request marked fulfilled and inventory updated.');
-    setTimeout(() => setSuccessFeedback(null), 2000);
+  // Section 2: Atomic Resource Deduction Workflow
+  const handleCommitResource = async (needId: string, resourceId?: string) => {
+    setFormError(null);
+    setSuccessFeedback(null);
+    setAllocationFeedback(null);
+
+    const need = assistanceRequests.find((r) => r.id === needId);
+    if (!need) return;
+
+    const matchedRes = resourceId
+      ? resources.find((r) => r.id === resourceId)
+      : resources.find((r) => r.category === need.category && r.quantity > 0);
+
+    if (!matchedRes) {
+      setFormError(`No available ${need.category} inventory in stock to fulfill this request.`);
+      return;
+    }
+
+    const previousQty = matchedRes.quantity;
+    const qtyToAllocate = need.remainingQuantity ?? need.quantityRequested ?? 1;
+
+    if (qtyToAllocate > previousQty) {
+      setFormError(`Insufficient stock: Only ${previousQty} ${matchedRes.unit} available, but ${qtyToAllocate} required.`);
+      return;
+    }
+
+    setCommittingId(needId);
+
+    const res = await fulfillAssistanceRequest(needId, partnerName, matchedRes.id, qtyToAllocate);
+
+    setCommittingId(null);
+
+    if (!res.success) {
+      setFormError(res.error || 'Failed to allocate relief resource.');
+      return;
+    }
+
+    const remainingQty = previousQty - qtyToAllocate;
+    setAllocationFeedback({
+      resourceName: matchedRes.itemName,
+      previousQty,
+      allocatedQty: qtyToAllocate,
+      remainingQty,
+      unit: matchedRes.unit,
+      requestId: needId,
+    });
+
+    setSuccessFeedback(
+      `Transaction Successful: Allocated ${qtyToAllocate} ${matchedRes.unit} to request ${needId}. Previously available: ${previousQty}, Remaining inventory: ${remainingQty}.`
+    );
   };
+
+  // Section 3: Enforce strict role authorization
+  const accessCheck = canAccessPortal('partner');
+  if (!accessCheck.allowed) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-16 text-center space-y-6">
+        <div className="h-16 w-16 mx-auto rounded-3xl bg-amber-50 border border-amber-200 text-amber-700 flex items-center justify-center">
+          <HeartHandshake className="w-8 h-8" />
+        </div>
+        <div className="space-y-2">
+          <h1 className="text-2xl font-black text-slate-900">Access Restricted</h1>
+          <p className="text-sm text-slate-600 max-w-lg mx-auto leading-relaxed">
+            {accessCheck.reason === 'citizen_denied'
+              ? 'You are signed in as a Citizen and do not have permission to access the Relief Partner portal. Please sign in with an authorized account.'
+              : accessCheck.reason === 'pending_approval'
+              ? 'Your Relief Partner account is currently pending administrator verification. Please contact disaster relief coordination.'
+              : 'The Relief Partner Network is restricted to verified humanitarian agencies and relief organizations. Please sign in.'}
+          </p>
+        </div>
+        <div className="flex items-center justify-center gap-3 pt-2">
+          {user ? (
+            <>
+              <button
+                onClick={logout}
+                className="px-4 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100 transition"
+              >
+                Sign Out
+              </button>
+              <button
+                onClick={() => {
+                  logout();
+                  openAuthForRole('partner');
+                }}
+                className="px-4 py-2 bg-[#1B4332] text-white rounded-xl text-xs font-bold hover:bg-[#245740] transition"
+              >
+                Sign In with Authorized Account
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => openAuthForRole('partner')}
+              className="px-5 py-2.5 bg-[#1B4332] text-white rounded-xl text-xs font-bold hover:bg-[#245740] transition"
+            >
+              Sign In as Relief Partner
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   // Requirement 13: Completely removed Impact Reports
   const partnerTabs: { id: PartnerSection; label: string; count?: number }[] = [
@@ -802,10 +911,11 @@ export const ReliefPartnerPortal: React.FC = () => {
 
                 <div className="shrink-0">
                   <button
+                    disabled={committingId === req.id}
                     onClick={() => handleCommitResource(req.id)}
-                    className="py-2 px-4 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-xs transition"
+                    className="py-2 px-4 bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white rounded-xl text-xs font-bold shadow-xs transition"
                   >
-                    Commit & Adopt Need
+                    {committingId === req.id ? 'Fulfilling...' : 'Commit & Adopt Need'}
                   </button>
                 </div>
               </div>
@@ -831,6 +941,8 @@ export const ReliefPartnerPortal: React.FC = () => {
             {pendingNeeds.map((need) => {
               // Find matching available resource in same category
               const matchedResource = resources.find((r) => r.category === need.category && r.quantity > 0);
+              const requestedQty = need.remainingQuantity ?? need.quantityRequested ?? 1;
+              const hasEnoughStock = matchedResource ? matchedResource.quantity >= requestedQty : false;
 
               return (
                 <div key={need.id} className="p-5 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -840,9 +952,21 @@ export const ReliefPartnerPortal: React.FC = () => {
                       <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-800">
                         Need: {need.category}
                       </span>
+                      <span className="text-[10px] font-bold font-mono text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded">
+                        Requires: {requestedQty} {need.unit || 'units'}
+                      </span>
                     </div>
                     <h4 className="font-bold text-slate-900 text-sm">{need.details}</h4>
                     <p className="text-xs text-slate-500">{need.location} ({need.peopleCount} evacuees)</p>
+
+                    {allocationFeedback && allocationFeedback.requestId === need.id && (
+                      <div className="mt-2 p-2.5 rounded-xl bg-emerald-100/70 border border-emerald-300 text-emerald-900 text-xs space-y-0.5 animate-in fade-in">
+                        <div className="font-bold">Transaction Confirmed for {allocationFeedback.resourceName}:</div>
+                        <div>• Previously available: <strong>{allocationFeedback.previousQty} {allocationFeedback.unit}</strong></div>
+                        <div>• Quantity allocated: <strong>{allocationFeedback.allocatedQty} {allocationFeedback.unit}</strong></div>
+                        <div>• Remaining available stock: <strong>{allocationFeedback.remainingQty} {allocationFeedback.unit}</strong></div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-3">
@@ -850,17 +974,22 @@ export const ReliefPartnerPortal: React.FC = () => {
                       <div className="text-right text-xs">
                         <span className="text-[10px] text-slate-400 block">Matched Stock:</span>
                         <span className="font-bold text-emerald-800">{matchedResource.itemName}</span>
-                        <span className="text-[10px] text-slate-500 block">Available: {matchedResource.quantity} {matchedResource.unit}</span>
+                        <span className="text-[10px] text-slate-500 block">Available: <strong>{matchedResource.quantity}</strong> {matchedResource.unit}</span>
                       </div>
                     ) : (
-                      <span className="text-xs text-slate-400 italic">No exact stock match</span>
+                      <span className="text-xs text-slate-400 italic">No compatible stock in inventory</span>
                     )}
 
                     <button
+                      disabled={!matchedResource || !hasEnoughStock || committingId === need.id}
                       onClick={() => handleCommitResource(need.id, matchedResource?.id)}
-                      className="py-2 px-4 bg-[#1B4332] hover:bg-[#245740] text-white rounded-xl text-xs font-bold transition shadow-xs"
+                      className="py-2.5 px-4 bg-[#1B4332] hover:bg-[#245740] disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5"
                     >
-                      Commit & Fulfill
+                      {committingId === need.id ? (
+                        <span>Processing...</span>
+                      ) : (
+                        <span>Commit and Fulfil Request</span>
+                      )}
                     </button>
                   </div>
                 </div>
